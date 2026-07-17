@@ -1,0 +1,19 @@
+# 별도 저장소로 관리되는 하위 프로젝트 (제외)
+/Lifenology/
+/gemini-live-api-examples/
+
+# 비밀키
+.env
+**/.env
+
+# 논문 등 부속 자료
+*.pdf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store

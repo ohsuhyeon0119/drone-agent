@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>낙상 감지 속도 검증</title>
+<style>
+  body {
+    font-family: -apple-system, sans-serif;
+    background: #111;
+    color: #eee;
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  h1 { font-size: 1.2rem; margin: 0; }
+  #video-wrap { position: relative; }
+  video { width: 480px; max-width: 90vw; border-radius: 8px; background: #000; }
+  #alert-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(200, 0, 0, 0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    font-weight: bold;
+    text-align: center;
+    border-radius: 8px;
+    padding: 20px;
+  }
+  #alert-overlay.show { display: flex; }
+  .controls { display: flex; gap: 10px; }
+  button {
+    padding: 10px 20px;
+    font-size: 1rem;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    background: #3b82f6;
+    color: white;
+  }
+  button:disabled { background: #555; cursor: not-allowed; }
+  #status {
+    font-family: monospace;
+    font-size: 0.95rem;
+    background: #1c1c1c;
+    padding: 12px 16px;
+    border-radius: 8px;
+    width: 480px;
+    max-width: 90vw;
+    white-space: pre-wrap;
+  }
+  #log {
+    font-family: monospace;
+    font-size: 0.8rem;
+    background: #1c1c1c;
+    padding: 12px 16px;
+    border-radius: 8px;
+    width: 480px;
+    max-width: 90vw;
+    height: 160px;
+    overflow-y: auto;
+  }
+  .log-line.hit { color: #ff6b6b; font-weight: bold; }
+</style>
+</head>
+<body>
+  <h1>낙상 감지 속도 검증 — 1초 주기, 단일 프레임 (Groq)</h1>
+
+  <div id="video-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="alert-overlay">🚨 낙상사고 감지했습니다!</div>
+  </div>
+
+  <div class="controls">
+    <button id="startBtn">Start</button>
+    <button id="stopBtn" disabled>Stop</button>
+  </div>
+
+  <div id="status">대기 중...</div>
+  <div id="log"></div>
+
+  <canvas id="canvas" style="display:none"></canvas>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+const alertOverlay = document.getElementById("alert-overlay");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+
+let stream = null;
+let intervalId = null;
+let inFlight = false;
+let checkCount = 0;
+let firstHitAt = null;
+let startedAt = null;
+
+function log(text, isHit) {
+  const line = document.createElement("div");
+  line.className = "log-line" + (isHit ? " hit" : "");
+  line.textContent = text;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function captureAndDetect() {
+  if (inFlight) return; // 이전 요청이 아직 안 끝났으면 이번 틱은 건너뜀
+  inFlight = true;
+  const tickStart = performance.now();
+  try {
+    canvas.width = 480;
+    canvas.height = 360;
+    ctx.drawImage(video, 0, 0, 480, 360);
+    const base64 = canvas.toDataURL("image/jpeg", 0.7).split(",")[1];
+
+    const res = await fetch("/detect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: base64 }),
+    });
+    const data = await res.json();
+    const roundTrip = Math.round(performance.now() - tickStart);
+    checkCount++;
+
+    if (!data.ok) {
+      statusEl.textContent = `[${checkCount}] 오류: ${data.error}`;
+      log(`#${checkCount} ERROR ${data.error} (${roundTrip}ms)`, false);
+      return;
+    }
+
+    const { event, confidence, reason } = data.result;
+    const isFall = event === "fall";
+    statusEl.textContent =
+      `[${checkCount}] event=${event} confidence=${confidence}\n` +
+      `reason: ${reason}\n` +
+      `서버 처리: ${data.latency_ms}ms / 왕복 총: ${roundTrip}ms`;
+    log(`#${checkCount} event=${event} conf=${confidence} (${data.latency_ms}ms) — ${reason}`, isFall);
+
+    if (isFall) {
+      if (firstHitAt === null) {
+        firstHitAt = performance.now();
+        const elapsedFromStart = ((firstHitAt - startedAt) / 1000).toFixed(2);
+        log(`>>> 시작 후 최초 감지까지: ${elapsedFromStart}초`, true);
+      }
+      showAlert();
+    }
+  } catch (e) {
+    log(`요청 실패: ${e.message}`, false);
+  } finally {
+    inFlight = false;
+  }
+}
+
+function showAlert() {
+  alertOverlay.classList.add("show");
+  setTimeout(() => alertOverlay.classList.remove("show"), 2000);
+}
+
+startBtn.onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+  } catch (e) {
+    alert("웹캠 접근 실패: " + e.message);
+    return;
+  }
+  checkCount = 0;
+  firstHitAt = null;
+  startedAt = performance.now();
+  logEl.innerHTML = "";
+  statusEl.textContent = "감지 시작...";
+  intervalId = setInterval(captureAndDetect, 1000);
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+};
+
+stopBtn.onclick = () => {
+  clearInterval(intervalId);
+  intervalId = null;
+  if (stream) {
+    stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+  }
+  statusEl.textContent = "정지됨.";
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+};
+</script>
+</body>
+</html>
