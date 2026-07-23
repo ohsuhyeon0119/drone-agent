@@ -15,5 +15,8 @@ __pycache__/
 .venv/
 venv/
 
+# drone-agent-app 런타임 데이터
+drone-agent-app/memory.json
+
 # OS
 .DS_Store

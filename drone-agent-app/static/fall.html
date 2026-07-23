@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>동행이 — 낙상 감지</title>
+<link rel="stylesheet" href="/static/shared.css" />
+</head>
+<body>
+  <div id="toast-container"></div>
+
+  <div class="topnav">
+    <div class="brand"><span class="dot"></span> 동행이</div>
+    <div class="tabs">
+      <a href="/fall" class="active">낙상 감지</a>
+      <a href="/medication">약 복용</a>
+      <a href="/task">작업 보조</a>
+    </div>
+  </div>
+
+  <div class="page-header">
+    <p class="eyebrow">시나리오 A · 긴급 상황</p>
+    <h1>넘어지면, 먼저 말을 겁니다</h1>
+    <p>대화 중 카메라가 낙상을 감지하면 동행이가 스스로 먼저 괜찮은지 묻고, 필요하면 119 신고까지 이어갑니다.</p>
+  </div>
+
+  <div class="main-grid cols-3">
+    <div class="card">
+      <h2>실시간 카메라</h2>
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="placeholder" id="video-placeholder">대화를 시작하면 카메라가 켜집니다</div>
+        <div class="alert-overlay" id="alert-overlay">🚨 낙상 감지! 확인이 필요합니다</div>
+      </div>
+      <div class="controls">
+        <button id="startBtn" class="btn primary">대화 시작</button>
+        <button id="stopBtn" class="btn danger" disabled>종료</button>
+        <span class="status-pill" id="statusPill"><span class="dot"></span> 대기 중</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>대화</h2>
+      <div class="chat-log" id="chatLog"></div>
+      <div class="input-row">
+        <input type="text" id="textInput" placeholder="메시지 입력..." />
+        <button id="sendBtn" class="btn">전송</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>감지 로그</h2>
+      <div class="event-log" id="eventLog"></div>
+    </div>
+  </div>
+
+  <canvas id="canvas" style="display:none"></canvas>
+
+<script src="/static/media-handler.js"></script>
+<script src="/static/gemini-client.js"></script>
+<script>
+const video = document.getElementById("video");
+const videoPlaceholder = document.getElementById("video-placeholder");
+const alertOverlay = document.getElementById("alert-overlay");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const statusPill = document.getElementById("statusPill");
+const chatLog = document.getElementById("chatLog");
+const eventLog = document.getElementById("eventLog");
+const textInput = document.getElementById("textInput");
+const sendBtn = document.getElementById("sendBtn");
+
+const mediaHandler = new MediaHandler();
+let currentUserDiv = null;
+let currentGeminiDiv = null;
+
+const client = new GeminiClient({
+  wsPath: "/ws/fall",
+  onOpen: async () => {
+    statusPill.textContent = "연결됨";
+    statusPill.classList.add("connected");
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+
+    await mediaHandler.startAudio((data) => client.send(data));
+    await mediaHandler.startVideo(video, (base64) => client.sendImage(base64));
+    videoPlaceholder.classList.add("hidden");
+    videoPlaceholder.style.display = "none";
+  },
+  onMessage: (event) => {
+    if (typeof event.data === "string") {
+      try {
+        handleJson(JSON.parse(event.data));
+      } catch (e) {
+        console.error(e);
+      }
+    } else {
+      mediaHandler.playAudio(event.data);
+    }
+  },
+  onClose: () => {
+    statusPill.textContent = "연결 끊김";
+    statusPill.classList.remove("connected");
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  },
+  onError: (e) => console.error("WS error", e),
+});
+
+function handleJson(msg) {
+  if (msg.type === "interrupted") {
+    mediaHandler.stopAudioPlayback();
+    currentUserDiv = null;
+    currentGeminiDiv = null;
+  } else if (msg.type === "turn_complete") {
+    currentUserDiv = null;
+    currentGeminiDiv = null;
+  } else if (msg.type === "user") {
+    currentUserDiv = appendMsg("user", msg.text, currentUserDiv);
+  } else if (msg.type === "gemini") {
+    currentGeminiDiv = appendMsg("gemini", msg.text, currentGeminiDiv);
+  } else if (msg.type === "alert") {
+    alertOverlay.classList.add("show");
+    setTimeout(() => alertOverlay.classList.remove("show"), 4000);
+  } else if (msg.type === "system_nudge") {
+    appendMsg("system-nudge", "⚙️ " + msg.text);
+  } else if (msg.type === "tool_call") {
+    appendMsg("tool-call", `🛠️ ${msg.name}(${JSON.stringify(msg.args)}) → ${msg.result}`);
+    if (msg.name === "notify_caregiver") {
+      showToast("📨", "보호자에게 알림을 전송했습니다", msg.args?.message || "", "good");
+    }
+  } else if (msg.type === "detect_result") {
+    appendEventLog(msg);
+  }
+}
+
+function showToast(icon, title, text, variant) {
+  const container = document.getElementById("toast-container");
+  const toast = document.createElement("div");
+  toast.className = "toast" + (variant ? " " + variant : "");
+  toast.innerHTML = `<span class="icon">${icon}</span><div class="body"><b>${title}</b><span></span></div>`;
+  toast.querySelector(".body span").textContent = text;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("show"));
+  setTimeout(() => {
+    toast.classList.remove("show");
+    setTimeout(() => toast.remove(), 250);
+  }, 5000);
+}
+
+function appendMsg(cls, text, existing) {
+  if (existing && (cls === "user" || cls === "gemini")) {
+    existing.textContent += text;
+    chatLog.scrollTop = chatLog.scrollHeight;
+    return existing;
+  }
+  const div = document.createElement("div");
+  div.className = "message " + cls;
+  div.textContent = text;
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+  return div;
+}
+
+function appendEventLog(msg) {
+  const line = document.createElement("div");
+  const t = new Date().toLocaleTimeString();
+  if (msg.ok) {
+    const hit = msg.event === "fall";
+    line.className = "line" + (hit ? " hit" : "");
+    line.textContent = `[${t}] event=${msg.event} conf=${msg.confidence} — ${msg.reason || ""}`;
+  } else {
+    line.className = "line";
+    line.textContent = `[${t}] ERROR: ${msg.error}`;
+  }
+  eventLog.appendChild(line);
+  eventLog.scrollTop = eventLog.scrollHeight;
+  while (eventLog.children.length > 60) eventLog.removeChild(eventLog.firstChild);
+}
+
+startBtn.onclick = async () => {
+  await mediaHandler.initializeAudio();
+  client.connect();
+};
+
+stopBtn.onclick = () => {
+  client.disconnect();
+  mediaHandler.stopAudio();
+  mediaHandler.stopVideo(video);
+  videoPlaceholder.style.display = "flex";
+};
+
+sendBtn.onclick = sendText;
+textInput.onkeypress = (e) => { if (e.key === "Enter") sendText(); };
+function sendText() {
+  const text = textInput.value;
+  if (text && client.isConnected()) {
+    client.sendText(text);
+    appendMsg("user", text);
+    textInput.value = "";
+  }
+}
+</script>
+</body>
+</html>
