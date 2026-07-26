@@ -40,7 +40,23 @@ VLM 대화. 키오스크·서류 등 노인이 어려워하는 것을 같이 보
 ## 실행
 
 ```bash
-pip install -r requirements.txt   # fastapi uvicorn python-dotenv google-genai openai
+pip install -r requirements.txt   # fastapi uvicorn python-dotenv google-genai openai websockets
 cp .env.example .env              # GEMINI_API_KEY, OPEN_ROUTER_KEY 채우기
 python main.py                    # http://localhost:8003
 ```
+
+## 영상 소스: 브라우저 웹캠 vs 폰 스트림
+
+기본은 브라우저 웹캠/마이크(getUserMedia)다. `.env`에 `PHONE_STREAM_URL`을 설정하면
+배포된 phone-stream 서버(예: `https://droneagent.cloud`)의 **폰 카메라·마이크가 모델
+입력이 된다** — 폰이 드론 시점 카메라 역할을 하는 구성.
+
+```
+PHONE_STREAM_URL=https://droneagent.cloud
+```
+
+- 서버의 `WS /ws/feed`를 구독해 영상(JPEG)은 `frame_buffer`(감지 VLM, 매 프레임)와
+  Gemini Live(~1fps 제한)에, 오디오(16kHz PCM)는 Gemini Live에 주입한다 (`_pump_phone_stream`).
+- 이때 브라우저의 웹캠 이미지·마이크 오디오는 무시된다(이중 입력 방지). 브라우저
+  페이지는 UI·동행이 음성 출력·자막 표시 용도로 그대로 사용한다.
+- 연결이 끊기면 3초 간격으로 자동 재접속. 비우면 기존 브라우저 방식 그대로.

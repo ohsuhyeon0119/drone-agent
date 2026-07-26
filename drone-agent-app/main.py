@@ -41,6 +41,14 @@ GEMINI_MODEL = os.getenv("MODEL", "gemini-3.1-flash-live-preview")
 OPENROUTER_API_KEY = os.getenv("OPEN_ROUTER_KEY", "")
 DETECT_MODEL = "meta-llama/llama-4-scout"
 
+# 폰 스트림 소스 (phone-stream 서버, 예: https://droneagent.cloud)
+# 설정하면 브라우저 웹캠/마이크 대신 폰의 영상·오디오가 모델 입력이 된다.
+# 비우면 기존처럼 브라우저 getUserMedia 사용.
+PHONE_STREAM_URL = os.getenv("PHONE_STREAM_URL", "").strip().rstrip("/")
+# Gemini Live에 넣는 영상은 기존 브라우저 경로와 동일하게 ~1fps로 제한
+# (frame_buffer는 매 프레임 갱신 — 감지 VLM은 항상 최신 프레임을 본다)
+PHONE_VIDEO_TO_GEMINI_INTERVAL = 1.0
+
 # ──────────────────────────────────────────────────────────────
 # 공통 페르소나
 # ──────────────────────────────────────────────────────────────
@@ -235,20 +243,26 @@ async def _run_gemini_session(
 
 
 async def _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, frame_buffer):
+    """브라우저 → 모델 입력. PHONE_STREAM_URL이 설정되면 영상/오디오는 폰 피드가
+    담당하므로 브라우저의 마이크 오디오와 웹캠 이미지는 버린다 (이중 입력 방지).
+    텍스트 메시지는 항상 통과."""
+    use_phone_source = bool(PHONE_STREAM_URL)
     try:
         while True:
             message = await websocket.receive()
             if message.get("bytes"):
-                await audio_input_queue.put(message["bytes"])
+                if not use_phone_source:
+                    await audio_input_queue.put(message["bytes"])
             elif message.get("text"):
                 text = message["text"]
                 try:
                     payload = json.loads(text)
                     if isinstance(payload, dict) and payload.get("type") == "image":
-                        image_data = base64.b64decode(payload["data"])
-                        await video_input_queue.put(image_data)
-                        if frame_buffer is not None:
-                            frame_buffer["data"] = image_data
+                        if not use_phone_source:
+                            image_data = base64.b64decode(payload["data"])
+                            await video_input_queue.put(image_data)
+                            if frame_buffer is not None:
+                                frame_buffer["data"] = image_data
                         continue
                 except json.JSONDecodeError:
                     pass
@@ -257,6 +271,49 @@ async def _receive_from_client(websocket, audio_input_queue, video_input_queue, 
         logger.info("WebSocket disconnected")
     except Exception as e:
         logger.error(f"Error receiving from client: {e}")
+
+
+async def _pump_phone_stream(audio_input_queue, video_input_queue, frame_buffer):
+    """phone-stream 서버의 /ws/feed에 붙어 폰의 영상('V')/오디오('A')를 모델 입력에 주입.
+
+    패킷 포맷: [1B 'V'|'A'][8B LE float64 capture_ts_ms][payload]
+      - V: JPEG → frame_buffer(감지 VLM, 매 프레임) + video_input_queue(Gemini, ~1fps 제한)
+      - A: 16kHz 16bit 모노 PCM → audio_input_queue (브라우저 마이크와 동일 포맷)
+    끊기면 3초 간격으로 재접속한다.
+    """
+    import websockets
+
+    base = PHONE_STREAM_URL
+    if base.startswith("https://"):
+        feed_url = "wss://" + base[len("https://"):] + "/ws/feed"
+    elif base.startswith("http://"):
+        feed_url = "ws://" + base[len("http://"):] + "/ws/feed"
+    else:
+        feed_url = base + "/ws/feed"
+
+    last_video_to_gemini = 0.0
+    while True:
+        try:
+            async with websockets.connect(feed_url, max_size=None) as ws:
+                logger.info(f"phone-stream feed 연결됨: {feed_url}")
+                async for data in ws:
+                    if not isinstance(data, (bytes, bytearray)) or len(data) < 10:
+                        continue
+                    kind, payload = data[0:1], bytes(data[9:])
+                    if kind == b"V":
+                        if frame_buffer is not None:
+                            frame_buffer["data"] = payload
+                        now = time.monotonic()
+                        if now - last_video_to_gemini >= PHONE_VIDEO_TO_GEMINI_INTERVAL:
+                            last_video_to_gemini = now
+                            await video_input_queue.put(payload)
+                    elif kind == b"A":
+                        await audio_input_queue.put(payload)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"phone-stream feed 끊김/실패, 3초 후 재시도: {type(e).__name__}: {e}")
+        await asyncio.sleep(3)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -287,6 +344,9 @@ async def ws_fall(websocket: WebSocket):
     receive_task = asyncio.create_task(
         _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, frame_buffer)
     )
+    phone_task = asyncio.create_task(
+        _pump_phone_stream(audio_input_queue, video_input_queue, frame_buffer)
+    ) if PHONE_STREAM_URL else None
 
     async def vision_loop():
         openrouter_client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
@@ -334,6 +394,8 @@ async def ws_fall(websocket: WebSocket):
     finally:
         receive_task.cancel()
         vision_task.cancel()
+        if phone_task:
+            phone_task.cancel()
         try:
             await websocket.close()
         except Exception:
@@ -367,6 +429,9 @@ async def ws_medication(websocket: WebSocket):
     receive_task = asyncio.create_task(
         _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, frame_buffer)
     )
+    phone_task = asyncio.create_task(
+        _pump_phone_stream(audio_input_queue, video_input_queue, frame_buffer)
+    ) if PHONE_STREAM_URL else None
 
     async def greet_once():
         """세션 시작 후 잠깐 기다렸다가(오디오/영상 파이프 준비 시간) 먼저 말을 건다."""
@@ -432,6 +497,8 @@ async def ws_medication(websocket: WebSocket):
         receive_task.cancel()
         vision_task.cancel()
         greet_task.cancel()
+        if phone_task:
+            phone_task.cancel()
         try:
             await websocket.close()
         except Exception:
@@ -460,6 +527,9 @@ async def ws_task(websocket: WebSocket):
     receive_task = asyncio.create_task(
         _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, None)
     )
+    phone_task = asyncio.create_task(
+        _pump_phone_stream(audio_input_queue, video_input_queue, None)
+    ) if PHONE_STREAM_URL else None
 
     try:
         await _run_gemini_session(websocket, gemini_client, audio_input_queue, video_input_queue, text_input_queue, None)
@@ -467,6 +537,8 @@ async def ws_task(websocket: WebSocket):
         logger.error(f"[/task] session error: {type(e).__name__}: {e}")
     finally:
         receive_task.cancel()
+        if phone_task:
+            phone_task.cancel()
         try:
             await websocket.close()
         except Exception:

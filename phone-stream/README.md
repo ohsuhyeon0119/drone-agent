@@ -68,7 +68,8 @@ TLS는 플랫폼이 종단하는 구성을 권장 (iOS 카메라는 HTTPS 필수
 | `/` | 폰용 송출 페이지 (카메라 캡처 → WS 전송, 1/5/10fps 선택) |
 | `/viewer` | 수신 확인 뷰어 (fps, e2e 지연 표시) |
 | `WS /ws/phone` | 폰 → 서버 프레임 인입 |
-| `WS /ws/viewer` | 서버 → 뷰어/백엔드 프레임 push 구독 |
+| `WS /ws/viewer` | 서버 → 뷰어/백엔드 프레임 push 구독 (영상만) |
+| `WS /ws/feed` | **AI 소비용**: 영상+오디오 push 구독 — drone-agent-app의 `PHONE_STREAM_URL`이 사용 (포맷: 폰→서버와 동일 `[1B 'V'\|'A'][8B ts][payload]`) |
 | `GET /frame.jpg` | **AI 파이프라인용 훅**: 최신 프레임 1장 (헤더에 캡처/수신 시각) |
 | `GET /stats` | 연결 상태, 수신 fps, 최신 프레임 age, e2e 지연 JSON |
 

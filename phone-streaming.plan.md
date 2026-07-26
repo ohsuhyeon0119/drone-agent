@@ -110,7 +110,9 @@ ffmpeg/OpenCV로 프레임 추출 → `frame_buffer`.
 5. [x] `make_cert.sh` + README (아이폰 접속 절차)
 6. [x] 로컬 기동 검증 — 폰 시뮬레이터로 e2e 통과 (프레임 3장: WS 인입 → frame_buffer → 뷰어 수신 → /frame.jpg 바이트 일치, 시계동기화 ping/pong 동작). 실폰 테스트는 사용자가 수행
 7. [ ] (후속) 마이크 오디오 PCM 전송 — Gemini Live 입력용
-8. [ ] (후속) 기존 main.py frame_buffer와 통합
+8. [x] (후속) 기존 main.py frame_buffer와 통합 — 서버에 `WS /ws/feed`(영상+오디오 AI 소비용) 추가,
+   drone-agent-app에 `PHONE_STREAM_URL` env 추가 (설정 시 브라우저 웹캠/마이크 대신 폰 피드가
+   frame_buffer·Gemini 입력 큐로 주입, 미설정 시 기존 동작). 배포 서버 대상 e2e 검증 통과 (2026-07-26)
 
 ### 리스크
 

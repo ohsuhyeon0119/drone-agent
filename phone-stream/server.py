@@ -6,13 +6,15 @@
 
 AI 파이프라인(기존 main.py의 Groq detect / Gemini Live)은 다음 훅으로 프레임을 소비:
   - GET /frame.jpg          : 최신 프레임 1장 (폴링용)
-  - WS  /ws/viewer          : 프레임 push 구독
+  - WS  /ws/viewer          : 프레임 push 구독 (영상만, 사람용 뷰어)
+  - WS  /ws/feed            : 영상+오디오 push 구독 (AI 소비용 — drone-agent-app이 사용)
   - get_latest_frame()      : 같은 프로세스에 흡수 통합할 경우
 
 바이너리 포맷 (폰 → 서버, 같은 WS에 영상/오디오 혼합):
   [1B 타입: b"V"=영상 | b"A"=오디오] + [8B LE float64: 서버시계 기준 캡처시각(ms)] + [payload]
   영상 payload: JPEG bytes / 오디오 payload: 16kHz 16bit 모노 PCM (기본 100ms = 3200B)
 서버 → 뷰어: [8B capture_ts(ms)] + [8B recv_ts(ms)] + [JPEG bytes] (영상만)
+서버 → feed 구독자: 폰 → 서버 포맷 그대로 전달 ([1B 'V'|'A'][8B capture_ts][payload])
 
 iOS getUserMedia는 HTTPS 필수 → make_cert.sh로 인증서 생성 후 기동.
 """
@@ -69,6 +71,11 @@ def subscribe_audio(maxsize: int = 100) -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue(maxsize=maxsize)
     audio_queues.add(q)
     return q
+
+
+# feed fan-out: AI 소비자(drone-agent-app)용. 폰이 보낸 패킷을 포맷 그대로 전달한다.
+# 오디오가 섞여 있어 큐를 넉넉히 잡되(200 ≈ 영상+오디오 수 초 분량), 밀리면 오래된 것부터 버린다.
+feed_queues: set[asyncio.Queue] = set()
 
 # ---- 녹화 모드 (run.sh에서 선택) ----
 #   off  : 저장 안 함 — 실시간 전달만 (기존 동작)
@@ -225,6 +232,7 @@ async def stats():
         "audio_seconds_received": round(audio_bytes_total / 2 / AUDIO_SR, 1),
         "audio_last_age_ms": round(now - audio_last_recv_ts) if audio_last_recv_ts else None,
         "audio_subscribers": len(audio_queues),
+        "feed_subscribers": len(feed_queues),
     }
 
 
@@ -247,6 +255,15 @@ async def ws_phone(ws: WebSocket):
                 (capture_ts,) = struct.unpack("<d", data[1:9])
                 payload = data[9:]
                 recv_ts = _now_ms()
+
+                if kind in (b"V", b"A"):
+                    for q in list(feed_queues):
+                        if q.full():
+                            try:
+                                q.get_nowait()  # 밀린 구독자는 오래된 패킷부터 포기
+                            except asyncio.QueueEmpty:
+                                pass
+                        q.put_nowait(data)
 
                 if kind == b"A":
                     audio_chunk_seq += 1
@@ -327,6 +344,36 @@ async def ws_viewer(ws: WebSocket):
     finally:
         viewer_queues.discard(q)
         logger.info("viewer disconnected (%d total)", len(viewer_queues))
+
+
+@app.websocket("/ws/feed")
+async def ws_feed(ws: WebSocket):
+    """AI 소비자용: 폰이 보내는 영상('V')+오디오('A') 패킷을 원본 포맷 그대로 push.
+
+    폰이 안 보내는 동안에도 구독자 끊김을 즉시 감지해야 하므로(죽은 큐 누적 방지),
+    send 루프와 별도로 receive를 대기해 disconnect 이벤트를 잡는다."""
+    await ws.accept()
+    q: asyncio.Queue = asyncio.Queue(maxsize=200)
+    feed_queues.add(q)
+    logger.info("feed subscriber connected (%d total)", len(feed_queues))
+
+    async def sender():
+        while True:
+            packet = await q.get()
+            await ws.send_bytes(packet)
+
+    send_task = asyncio.create_task(sender())
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg["type"] == "websocket.disconnect":
+                break
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        send_task.cancel()
+        feed_queues.discard(q)
+        logger.info("feed subscriber disconnected (%d total)", len(feed_queues))
 
 
 if __name__ == "__main__":
