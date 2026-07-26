@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>📱 폰 카메라 → 서버 스트리밍</title>
+<style>
+  body {
+    font-family: -apple-system, sans-serif;
+    background: #111;
+    color: #eee;
+    margin: 0;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  h1 { font-size: 1.05rem; margin: 0; }
+  video { width: 100%; max-width: 480px; border-radius: 8px; background: #000; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  button, select {
+    padding: 12px 20px;
+    font-size: 1rem;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    background: #3b82f6;
+    color: white;
+  }
+  button:disabled { background: #555; }
+  select { background: #333; }
+  #status {
+    font-family: monospace;
+    font-size: 0.85rem;
+    background: #1c1c1c;
+    padding: 12px 14px;
+    border-radius: 8px;
+    width: 100%;
+    max-width: 480px;
+    box-sizing: border-box;
+    white-space: pre-wrap;
+    min-height: 5em;
+  }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #777; margin-right: 6px; }
+  .dot.on { background: #22c55e; }
+</style>
+</head>
+<body>
+  <h1><span id="wsDot" class="dot"></span>폰 카메라 → 서버 실시간 스트리밍</h1>
+
+  <video id="video" autoplay playsinline muted></video>
+
+  <div class="controls">
+    <button id="startBtn">▶ 스트리밍 시작</button>
+    <button id="stopBtn" disabled>■ 정지</button>
+    <select id="fpsSel">
+      <option value="1">1 fps</option>
+      <option value="5" selected>5 fps</option>
+      <option value="10">10 fps</option>
+    </select>
+    <select id="camSel">
+      <option value="environment" selected>후면 카메라</option>
+      <option value="user">전면 카메라</option>
+    </select>
+    <select id="micSel">
+      <option value="on" selected>🎤 마이크 켬</option>
+      <option value="off">마이크 끔</option>
+    </select>
+  </div>
+
+  <div id="status">대기 중...</div>
+  <canvas id="canvas" style="display:none"></canvas>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const wsDot = document.getElementById("wsDot");
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const fpsSel = document.getElementById("fpsSel");
+const camSel = document.getElementById("camSel");
+const micSel = document.getElementById("micSel");
+
+let stream = null;
+let ws = null;
+let sendTimer = null;
+let running = false;
+let clockOffset = 0;   // 서버시각 ≈ Date.now() + clockOffset
+let sentCount = 0;
+let skipCount = 0;
+let sentTimes = [];
+let wakeLock = null;
+let audioCtx = null;
+let audioSrc = null;
+let audioProc = null;
+let audioChunks = 0;
+
+const MAX_BUFFERED = 512 * 1024; // ws 송신 버퍼가 이만큼 밀리면 "영상" 프레임 skip (오디오는 안 버림)
+const AUDIO_SR = 16000;          // 서버/Gemini Live가 기대하는 샘플레이트
+const AUDIO_CHUNK = 1600;        // 100ms어치 샘플 = 전송 단위
+
+// 와이어 포맷: [1B 타입 'V'|'A'] + [8B float64 서버시계 캡처시각(ms)] + payload
+function packMsg(type, ts, payload) {
+  const buf = new ArrayBuffer(9 + payload.byteLength);
+  const dv = new DataView(buf);
+  dv.setUint8(0, type.charCodeAt(0));
+  dv.setFloat64(1, ts, true);
+  new Uint8Array(buf, 9).set(new Uint8Array(payload));
+  return buf;
+}
+
+function setStatus(lines) {
+  statusEl.textContent = lines.join("\n");
+}
+
+function wsUrl(path) {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${location.host}${path}`;
+}
+
+// ---- 시계 동기화: ping 5회, offset = server - (t0 + rtt/2)의 중앙값 ----
+async function syncClock(socket) {
+  const offsets = [];
+  for (let i = 0; i < 5; i++) {
+    const pong = await new Promise((resolve) => {
+      const t0 = Date.now();
+      const handler = (ev) => {
+        if (typeof ev.data !== "string") return;
+        const msg = JSON.parse(ev.data);
+        if (msg.type === "pong" && msg.t0 === t0) {
+          socket.removeEventListener("message", handler);
+          resolve({ t0, server: msg.server, t1: Date.now() });
+        }
+      };
+      socket.addEventListener("message", handler);
+      socket.send(JSON.stringify({ type: "ping", t0 }));
+    });
+    const rtt = pong.t1 - pong.t0;
+    offsets.push(pong.server - (pong.t0 + rtt / 2));
+    await new Promise((r) => setTimeout(r, 80));
+  }
+  offsets.sort((a, b) => a - b);
+  clockOffset = offsets[Math.floor(offsets.length / 2)];
+}
+
+function connectWs() {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(wsUrl("/ws/phone"));
+    socket.binaryType = "arraybuffer";
+    socket.onopen = () => { wsDot.classList.add("on"); resolve(socket); };
+    socket.onerror = (e) => reject(new Error("WebSocket 연결 실패"));
+    socket.onclose = () => {
+      wsDot.classList.remove("on");
+      if (running) {
+        setStatus(["연결 끊김 — 2초 후 재연결..."]);
+        setTimeout(async () => {
+          if (!running) return;
+          try {
+            ws = await connectWs();
+            await syncClock(ws);
+          } catch (e) { /* onclose가 다시 재시도 예약 */ }
+        }, 2000);
+      }
+    };
+  });
+}
+
+async function captureAndSend() {
+  if (!running || !ws || ws.readyState !== WebSocket.OPEN) return;
+  if (ws.bufferedAmount > MAX_BUFFERED) { skipCount++; updateStatus(); return; }
+  if (!video.videoWidth) return;
+
+  const w = 640;
+  const h = Math.round((video.videoHeight / video.videoWidth) * w);
+  canvas.width = w;
+  canvas.height = h;
+  ctx.drawImage(video, 0, 0, w, h);
+
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.7));
+  if (!blob || !running || ws.readyState !== WebSocket.OPEN) return;
+
+  const jpeg = await blob.arrayBuffer();
+  ws.send(packMsg("V", Date.now() + clockOffset, jpeg));
+
+  sentCount++;
+  sentTimes.push(performance.now());
+  if (sentTimes.length > 100) sentTimes.splice(0, 50);
+  updateStatus(Math.round(jpeg.byteLength / 1024));
+}
+
+// ---- 마이크: 브라우저 샘플레이트(보통 48kHz) → 16kHz 다운샘플 → 100ms 조각 전송 ----
+// ScriptProcessor는 구식 API지만 iOS Safari 포함 어디서나 동작해서 PoC엔 가장 안전.
+function startAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioSrc = audioCtx.createMediaStreamSource(stream);
+  audioProc = audioCtx.createScriptProcessor(4096, 1, 1);
+
+  const ratio = audioCtx.sampleRate / AUDIO_SR;
+  let residual = new Float32Array(0); // 콜백 경계에서 남는 원본 샘플 (연속성 유지)
+  let pending = [];                   // 16kHz로 변환됐지만 아직 100ms가 안 찬 샘플들
+
+  audioProc.onaudioprocess = (e) => {
+    if (!running || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const input = e.inputBuffer.getChannelData(0);
+    const src = new Float32Array(residual.length + input.length);
+    src.set(residual);
+    src.set(input, residual.length);
+
+    const outLen = Math.floor((src.length - 1) / ratio);
+    for (let i = 0; i < outLen; i++) {
+      const pos = i * ratio;
+      const i0 = Math.floor(pos);
+      const frac = pos - i0;
+      pending.push(src[i0] * (1 - frac) + src[i0 + 1] * frac); // 선형 보간
+    }
+    residual = src.slice(Math.floor(outLen * ratio));
+
+    while (pending.length >= AUDIO_CHUNK) {
+      const samples = pending.splice(0, AUDIO_CHUNK);
+      const pcm = new Int16Array(AUDIO_CHUNK);
+      for (let i = 0; i < AUDIO_CHUNK; i++) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      // 조각 시작 시각 ≈ 지금 - (조각 100ms + 아직 안 보낸 잔여분)
+      const ts = Date.now() + clockOffset - (AUDIO_CHUNK + pending.length) / AUDIO_SR * 1000;
+      ws.send(packMsg("A", ts, pcm.buffer));
+      audioChunks++;
+    }
+  };
+
+  audioSrc.connect(audioProc);
+  audioProc.connect(audioCtx.destination); // 연결해야 콜백이 돎 (출력은 무음이라 에코 없음)
+}
+
+function stopAudio() {
+  if (audioProc) { audioProc.disconnect(); audioProc = null; }
+  if (audioSrc) { audioSrc.disconnect(); audioSrc = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+}
+
+function updateStatus(lastKb) {
+  const now = performance.now();
+  const window5s = sentTimes.filter((t) => now - t < 5000);
+  setStatus([
+    `전송 프레임: ${sentCount} (skip: ${skipCount})`,
+    `송신 fps(5s): ${(window5s.length / 5).toFixed(1)}`,
+    lastKb ? `마지막 프레임: ${lastKb} KB` : "",
+    audioCtx ? `오디오: ${(audioChunks / 10).toFixed(1)}초 전송 (100ms 조각 ${audioChunks}개)` : "오디오: 꺼짐",
+    `시계 offset: ${clockOffset.toFixed(0)} ms`,
+  ].filter(Boolean));
+}
+
+startBtn.onclick = async () => {
+  startBtn.disabled = true;
+  try {
+    const micOn = micSel.value === "on";
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: camSel.value, width: { ideal: 1280 } },
+      audio: micOn ? { echoCancellation: true, noiseSuppression: true } : false,
+    });
+    video.srcObject = stream;
+
+    setStatus(["서버 연결 중..."]);
+    running = true;
+    ws = await connectWs();
+    setStatus(["시계 동기화 중..."]);
+    await syncClock(ws);
+
+    // 화면 꺼짐 방지 (지원 브라우저에서만)
+    try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (e) {}
+
+    sentCount = 0; skipCount = 0; sentTimes = []; audioChunks = 0;
+    if (micOn) startAudio(); // 사용자 제스처(버튼 탭) 안이라 iOS에서도 AudioContext 시작 가능
+
+    const interval = 1000 / parseInt(fpsSel.value, 10);
+    sendTimer = setInterval(captureAndSend, interval);
+    stopBtn.disabled = false;
+    setStatus(["스트리밍 중..."]);
+  } catch (e) {
+    running = false;
+    setStatus(["시작 실패: " + e.message]);
+    startBtn.disabled = false;
+  }
+};
+
+stopBtn.onclick = () => {
+  running = false;
+  clearInterval(sendTimer);
+  sendTimer = null;
+  stopAudio();
+  if (ws) { ws.close(); ws = null; }
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+  setStatus(["정지됨."]);
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+};
+</script>
+</body>
+</html>

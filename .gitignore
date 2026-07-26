@@ -5,6 +5,10 @@
 # 비밀키
 .env
 **/.env
+phone-stream/certs/
+
+# 녹화물 (용량 큼)
+phone-stream/recordings/
 
 # 논문 등 부속 자료
 *.pdf
@@ -14,9 +18,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
-
-# drone-agent-app 런타임 데이터
-drone-agent-app/memory.json
 
 # OS
 .DS_Store

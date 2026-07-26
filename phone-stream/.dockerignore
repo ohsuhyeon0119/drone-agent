@@ -1,0 +1,7 @@
+.venv
+certs
+__pycache__
+*.pyc
+README.md
+run.sh
+make_cert.sh
