@@ -1,5 +1,9 @@
 # phone-stream OCI 배포 — 작업 인수인계
 
+> ⚠️ 2026-07-26 이후 라우팅 변경: **https://droneagent.cloud 은 이제 drone-agent-app(동행이 UI)**,
+> phone-stream(폰 송출)은 **https://64.110.109.126.sslip.io** 로 접속. 최신 서버 구성은 `SERVER.md`가 기준.
+> 아래 내용은 phone-stream 최초 배포(2026-07-25) 기록.
+
 > 2026-07-25 갱신. **배포 완료.** 남은 것은 실기기 테스트뿐.
 > 상세 서버 정보는 `SERVER.md`, 앱 정보는 `phone-stream/README.md` 참고.
 
