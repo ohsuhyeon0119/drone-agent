@@ -6,10 +6,10 @@
 /task        작업 보조: 단순 VLM 대화 (감지 로직 없음)
 
 세 페이지 모두 Gemini Live API(음성 대화, gemini_live.py)를 공유하고,
-/fall·/medication은 추가로 OpenRouter(Groq 백엔드) 기반 프레임 감지 루프를 돌려
-감지되면 nudge_input_queue를 통해 Gemini Live에 강제로 턴을 발생시킨다.
-이 메커니즘은 gemini-live-api-examples/gemini-live-genai-python-sdk에서
-먼저 검증된 것을 그대로 가져온 것이다.
+/fall·/medication은 추가로 "감지 → 판단 → 넛지" 파이프라인(detection_graph.py,
+LangGraph로 구현)을 돌려 감지되면 nudge_input_queue를 통해 Gemini Live에
+강제로 턴을 발생시킨다. 이 두 시나리오는 detection_graph만 공유하고
+프롬프트·타겟 이벤트·쿨다운·넛지 문구만 다르게 넣는다.
 """
 
 import asyncio
@@ -17,17 +17,15 @@ import base64
 import json
 import logging
 import os
-import re
-import time
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from openai import AsyncOpenAI
 
 import memory
+from detection_graph import detection_graph
 from gemini_live import GeminiLive
 
 load_dotenv()
@@ -38,8 +36,6 @@ logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("MODEL", "gemini-3.1-flash-live-preview")
-OPENROUTER_API_KEY = os.getenv("OPEN_ROUTER_KEY", "")
-DETECT_MODEL = "meta-llama/llama-4-scout"
 
 # ──────────────────────────────────────────────────────────────
 # 공통 페르소나
@@ -57,37 +53,26 @@ PERSONA_BASE = """당신의 이름은 '동행이'입니다. 노인 곁을 지키
 받으면 지금 하던 대화를 자연스럽게 멈추고 그 상황에 맞게 먼저 말을 걸거나 확인 질문을
 하세요. '[SYSTEM]' 문구 자체를 사용자에게 그대로 읽거나 언급하지 마세요."""
 
-FALL_PERSONA = (
+# 세 시나리오(낙상/복약/그 외 일반 대화)를 하나의 세션에서 동시에 처리하는 페르소나.
+# 어떤 [SYSTEM] 신호가 오든 그때그때 알아서 대응하고, 아무 신호가 없을 때는
+# 자유로운 대화/작업 보조 역할을 한다.
+UNIFIED_PERSONA = (
     PERSONA_BASE
     + """
 
-지금은 산책 등 일상 대화 중 낙상 사고를 대비하는 상황입니다.
-낙상이 감지되었다는 [SYSTEM] 메시지를 받으면 즉시 걱정스러운 톤으로
-"괜찮으세요?"라고 물어보고 119 신고 여부를 확인하세요. 사용자가 신고를 원하거나,
-괜찮지 않다고 답하거나, 응답이 없으면 notify_caregiver 도구를 호출해 신고 상황을
-기록하세요. 사용자가 명확히 괜찮다고 답하면 신고하지 말고 안심시키는 말로 마무리하세요."""
-)
+당신은 세 가지 상황을 동시에 대비합니다 — 무슨 상황인지는 당신이 미리 아는 게
+아니라, 그때그때 받는 [SYSTEM] 신호로 알게 됩니다:
 
-MEDICATION_PERSONA = (
-    PERSONA_BASE
-    + """
+1. 낙상 감지 신호를 받으면: 즉시 걱정스러운 톤으로 "괜찮으세요?"라고 묻고 119 신고
+   여부를 확인하세요. 사용자가 신고를 원하거나, 괜찮지 않다고 답하거나, 응답이 없으면
+   notify_caregiver 도구를 호출하세요. 명확히 괜찮다고 하면 신고하지 말고 안심시키세요.
+2. 복약 시간 또는 복약 확인 신호를 받으면: 처방 정보를 바탕으로 먼저 다정하게
+   복용을 권하거나(시간 안내 신호), 복용이 확인됐으면 "잘하셨어요!"처럼 칭찬하세요
+   (아직 안 먹었다면 부드럽게 다시 권유).
+3. 그 외에는: 평소처럼 자유롭게 대화하거나, 사용자가 화면·물건에 대해 물어보면
+   카메라로 보이는 것을 근거로 쉽고 친절하게 설명해주세요.
 
-지금은 노인의 복약 시간을 챙기는 상황입니다. [SYSTEM] 메시지로 지금이 복약 시간이라는
-안내를 받으면, 그 내용을 바탕으로 먼저 다정하게 말을 걸어 복용을 권해주세요
-(예: "OO님, 지금 20시입니다. 지난번에 처방받으신 혈압약을 드셔야 해요.").
-사용자가 복용하는 모습이 카메라로 확인되었다는 [SYSTEM] 메시지를 받으면
-"잘하셨어요!"처럼 따뜻하게 칭찬하고 격려하세요. 아직 안 먹었다고 답하면
-부드럽게 다시 권유하고, 재차 확인해주세요."""
-)
-
-TASK_PERSONA = (
-    PERSONA_BASE
-    + """
-
-지금은 일상적인 작업(예: 키오스크, 가전제품, 서류 등)을 함께 보면서 돕는 상황입니다.
-사용자가 화면이나 눈앞의 물건에 대해 물어보면, 카메라로 보이는 것을 근거로
-쉽고 친절하게 한 단계씩 설명해주세요. 어려운 용어는 피하고, 필요하면 되물어서
-정확히 확인한 뒤 안내하세요."""
+여러 신호가 겹치면 더 급한 것(낙상)을 우선하세요."""
 )
 
 FALL_DETECT_PROMPT = """이 이미지를 보고 사람이 엎드려 있거나 넘어져 있는지 감지하라.
@@ -127,43 +112,8 @@ def notify_caregiver(event_type: str, message: str) -> str:
     return "보호자에게 알림을 전송했습니다."
 
 
-def _parse_json(text: str) -> dict | None:
-    cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip())
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except json.JSONDecodeError:
-                pass
-    return None
-
-
-async def detect_event(openrouter_client: AsyncOpenAI, frame: bytes, prompt: str) -> dict | None:
-    """단일 프레임을 OpenRouter(Groq 우선, 혼잡 시 자동 대체)로 분석해 JSON 판정을 받는다."""
-    data_url = f"data:image/jpeg;base64,{base64.b64encode(frame).decode()}"
-    response = await openrouter_client.chat.completions.create(
-        model=DETECT_MODEL,
-        messages=[
-            {"role": "system", "content": prompt},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": "이 이미지를 판정하세요."},
-                    {"type": "image_url", "image_url": {"url": data_url}},
-                ],
-            },
-        ],
-        temperature=0.1,
-        max_tokens=100,
-        extra_body={"provider": {"order": ["groq"]}},
-    )
-    raw = response.choices[0].message.content or ""
-    return _parse_json(raw)
-
+# 현재 연결된 /ws/unified 세션 핸들 — "약 복용 알림" 버튼이 여기로 넛지를 주입한다.
+_active_unified_session = {"queue": None, "websocket": None}
 
 # ──────────────────────────────────────────────────────────────
 # FastAPI 앱
@@ -181,28 +131,42 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def root():
-    return RedirectResponse(url="/fall")
+    return FileResponse("static/unified.html")
 
 
-@app.get("/fall")
-async def fall_page():
-    return FileResponse("static/fall.html")
-
-
-@app.get("/medication")
-async def medication_page():
-    return FileResponse("static/medication.html")
-
-
-@app.get("/task")
-async def task_page():
-    return FileResponse("static/task.html")
+@app.get("/unified")
+async def unified_page():
+    return FileResponse("static/unified.html")
 
 
 @app.get("/api/medication/state")
 async def medication_state():
     """대시보드가 새로고침 시에도 지금까지의 메모리 기록을 볼 수 있게 하는 조회용 엔드포인트."""
     return {"profile": memory.get_profile(), "logs": memory.get_logs()}
+
+
+@app.post("/api/remind-medication")
+async def remind_medication():
+    """"약 복용 알림" 버튼(프론트에서 5초 카운트다운 후 호출)이 여기로 들어온다.
+
+    현재 연결된 /ws/unified 세션에 복약 안내 넛지를 주입해 동행이가 먼저 말을
+    걸게 만든다. 연결된 세션이 없으면 에러를 돌려준다.
+    """
+    queue = _active_unified_session["queue"]
+    ws = _active_unified_session["websocket"]
+    if queue is None:
+        return {"ok": False, "error": "연결된 세션이 없습니다. 먼저 대화를 시작하세요."}
+
+    profile = memory.get_profile()
+    nudge = (
+        f"[SYSTEM] 지금은 {profile['scheduled_time']}입니다. {profile['name']}님께 지난번에 "
+        f"처방받으신 {profile['medication']}을 드셔야 한다고 먼저 다정하게 말을 거세요."
+    )
+    if ws is not None:
+        await ws.send_json({"type": "system_nudge", "text": nudge})
+    await queue.put(nudge)
+    logger.info("[/api/remind-medication] 복약 알림 넛지 주입됨")
+    return {"ok": True}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -260,20 +224,26 @@ async def _receive_from_client(websocket, audio_input_queue, video_input_queue, 
 
 
 # ──────────────────────────────────────────────────────────────
-# /ws/fall — 낙상 감지
+# /ws/unified — 낙상·복약·작업보조를 한 세션에서 동시에 판단
 # ──────────────────────────────────────────────────────────────
-@app.websocket("/ws/fall")
-async def ws_fall(websocket: WebSocket):
+@app.websocket("/ws/unified")
+async def ws_unified(websocket: WebSocket):
+    """세 감지기를 동시에 돌려서, 어떤 상황이든 알아서 알아채고 반응한다.
+
+    /fall·/medication은 사람이 탭으로 시나리오를 미리 골라야 하지만, 여기서는
+    detection_graph를 낙상용·복약용으로 각각 병렬 실행해 같은 nudge_input_queue에
+    합류시킨다. Gemini에게는 세 시나리오를 다 아우르는 UNIFIED_PERSONA와
+    notify_caregiver tool을 준다 — "어떤 상황인지"는 코드가 미리 정하지 않고,
+    그때그때 어느 감지기가 먼저 걸리느냐로 자연스럽게 결정된다.
+    """
     await websocket.accept()
-    logger.info("[/fall] WebSocket connection accepted")
+    logger.info("[/unified] WebSocket connection accepted")
 
     audio_input_queue = asyncio.Queue()
     video_input_queue = asyncio.Queue()
     text_input_queue = asyncio.Queue()
     nudge_input_queue = asyncio.Queue()
     frame_buffer = {"data": None}
-    cooldown = {"fall": 0.0}
-    FALL_COOLDOWN = 10.0
 
     gemini_client = GeminiLive(
         api_key=GEMINI_API_KEY,
@@ -281,192 +251,112 @@ async def ws_fall(websocket: WebSocket):
         input_sample_rate=16000,
         tools=[NOTIFY_CAREGIVER_TOOL],
         tool_mapping={"notify_caregiver": notify_caregiver},
-        system_instruction=FALL_PERSONA,
+        system_instruction=UNIFIED_PERSONA,
     )
 
     receive_task = asyncio.create_task(
         _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, frame_buffer)
     )
 
-    async def vision_loop():
-        openrouter_client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
+    # 약 복용 알림은 자동 발화 대신 프론트의 "약 복용 알림" 버튼(5초 카운트다운
+    # 후 /api/remind-medication 호출)으로 트리거한다 — 데모 중 원치 않는 타이밍에
+    # 바로 말을 걸어버리는 문제를 피하기 위함.
+    _active_unified_session["queue"] = nudge_input_queue
+    _active_unified_session["websocket"] = websocket
+
+    async def fall_vision_loop():
+        last_trigger_at = 0.0
         while True:
             await asyncio.sleep(2)
             frame = frame_buffer["data"]
             if frame is None:
                 continue
-            try:
-                result = await detect_event(openrouter_client, frame, FALL_DETECT_PROMPT)
-                if result is None:
-                    await websocket.send_json({"type": "detect_result", "ok": False, "error": "판정 파싱 실패"})
-                    continue
-            except Exception as e:
-                logger.error(f"[/fall] detect error: {e}")
-                await websocket.send_json({"type": "detect_result", "ok": False, "error": str(e)[:200]})
+            result = await detection_graph.ainvoke({
+                "frame": frame,
+                "prompt": FALL_DETECT_PROMPT,
+                "target_event": "fall",
+                "cooldown": 10.0,
+                "last_trigger_at": last_trigger_at,
+                "nudge_template": (
+                    "[SYSTEM] 카메라 영상에서 사용자가 방금 쓰러지는 것이 감지되었습니다. "
+                    "지금 하던 대화를 멈추고 걱정스러운 톤으로 '괜찮으세요?'라고 즉시 물어보세요."
+                ),
+            })
+            if result.get("error"):
+                logger.error(f"[/unified:fall] detect error: {result['error']}")
+                await websocket.send_json({"type": "detect_result", "ok": False, "source": "fall", "error": result["error"]})
                 continue
 
             await websocket.send_json({
-                "type": "detect_result", "ok": True,
+                "type": "detect_result", "source": "fall", "ok": True,
                 "event": result.get("event"), "confidence": result.get("confidence"),
                 "reason": result.get("reason"),
             })
+            last_trigger_at = result.get("new_last_trigger_at", last_trigger_at)
 
-            now = time.time()
-            if result.get("event") == "fall" and now - cooldown["fall"] > FALL_COOLDOWN:
-                cooldown["fall"] = now
-                logger.info(f"[/fall] Fall detected! confidence={result.get('confidence')}")
-                await websocket.send_json({
-                    "type": "alert", "message": "낙상 감지! 즉시 확인이 필요합니다.",
-                })
-                nudge = (
-                    "[SYSTEM] 카메라 영상에서 사용자가 방금 쓰러지는 것이 감지되었습니다. "
-                    "지금 하던 대화를 멈추고 걱정스러운 톤으로 '괜찮으세요?'라고 즉시 물어보세요."
-                )
+            if result.get("should_trigger"):
+                logger.info(f"[/unified:fall] Fall detected! confidence={result.get('confidence')}")
+                await websocket.send_json({"type": "alert", "message": "낙상 감지! 즉시 확인이 필요합니다."})
+                nudge = result["nudge_text"]
                 await websocket.send_json({"type": "system_nudge", "text": nudge})
                 await nudge_input_queue.put(nudge)
 
-    vision_task = asyncio.create_task(vision_loop())
-
-    try:
-        await _run_gemini_session(websocket, gemini_client, audio_input_queue, video_input_queue, text_input_queue, nudge_input_queue)
-    except Exception as e:
-        logger.error(f"[/fall] session error: {type(e).__name__}: {e}")
-    finally:
-        receive_task.cancel()
-        vision_task.cancel()
-        try:
-            await websocket.close()
-        except Exception:
-            pass
-
-
-# ──────────────────────────────────────────────────────────────
-# /ws/medication — 약 복용 확인
-# ──────────────────────────────────────────────────────────────
-@app.websocket("/ws/medication")
-async def ws_medication(websocket: WebSocket):
-    await websocket.accept()
-    logger.info("[/medication] WebSocket connection accepted")
-
-    audio_input_queue = asyncio.Queue()
-    video_input_queue = asyncio.Queue()
-    text_input_queue = asyncio.Queue()
-    nudge_input_queue = asyncio.Queue()
-    frame_buffer = {"data": None}
-    cooldown = {"taken": 0.0}
-    TAKEN_COOLDOWN = 15.0
-    already_confirmed = {"value": False}
-
-    gemini_client = GeminiLive(
-        api_key=GEMINI_API_KEY,
-        model=GEMINI_MODEL,
-        input_sample_rate=16000,
-        system_instruction=MEDICATION_PERSONA,
-    )
-
-    receive_task = asyncio.create_task(
-        _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, frame_buffer)
-    )
-
-    async def greet_once():
-        """세션 시작 후 잠깐 기다렸다가(오디오/영상 파이프 준비 시간) 먼저 말을 건다."""
-        await asyncio.sleep(2.5)
-        profile = memory.get_profile()
-        nudge = (
-            f"[SYSTEM] 지금은 {profile['scheduled_time']}입니다. {profile['name']}님께 지난번에 "
-            f"처방받으신 {profile['medication']}을 드셔야 한다고 먼저 다정하게 말을 거세요."
-        )
-        await websocket.send_json({"type": "system_nudge", "text": nudge})
-        await nudge_input_queue.put(nudge)
-
-    greet_task = asyncio.create_task(greet_once())
-
-    async def vision_loop():
-        openrouter_client = AsyncOpenAI(base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY)
+    async def medication_vision_loop():
+        last_trigger_at = 0.0
         while True:
             await asyncio.sleep(2)
             frame = frame_buffer["data"]
             if frame is None:
                 continue
-            try:
-                result = await detect_event(openrouter_client, frame, MEDICATION_DETECT_PROMPT)
-                if result is None:
-                    await websocket.send_json({"type": "detect_result", "ok": False, "error": "판정 파싱 실패"})
-                    continue
-            except Exception as e:
-                logger.error(f"[/medication] detect error: {e}")
-                await websocket.send_json({"type": "detect_result", "ok": False, "error": str(e)[:200]})
+            result = await detection_graph.ainvoke({
+                "frame": frame,
+                "prompt": MEDICATION_DETECT_PROMPT,
+                "target_event": "taken",
+                "cooldown": 15.0,
+                "last_trigger_at": last_trigger_at,
+                "nudge_template": (
+                    "[SYSTEM] 방금 카메라로 사용자가 약을 복용하는 모습이 확인되었습니다. "
+                    "잘하셨다고 따뜻하게 칭찬하고 격려해주세요."
+                ),
+            })
+            if result.get("error"):
+                logger.error(f"[/unified:medication] detect error: {result['error']}")
+                await websocket.send_json({"type": "detect_result", "ok": False, "source": "medication", "error": result["error"]})
                 continue
 
             await websocket.send_json({
-                "type": "detect_result", "ok": True,
+                "type": "detect_result", "source": "medication", "ok": True,
                 "event": result.get("event"), "confidence": result.get("confidence"),
                 "reason": result.get("reason"),
             })
+            last_trigger_at = result.get("new_last_trigger_at", last_trigger_at)
 
-            now = time.time()
-            if result.get("event") == "taken" and now - cooldown["taken"] > TAKEN_COOLDOWN:
-                cooldown["taken"] = now
-                already_confirmed["value"] = True
+            if result.get("should_trigger"):
                 record = memory.record_medication_taken(note=result.get("reason", ""))
-                logger.info(f"[/medication] Medication taken! record={record}")
+                logger.info(f"[/unified:medication] Medication taken! record={record}")
                 await websocket.send_json({
                     "type": "memory_update",
                     "record": record,
                     "message": f"✅ {record['timestamp']} — {record['medication']} 복용 확인, 메모리 업데이트됨",
                 })
-                nudge = (
-                    "[SYSTEM] 방금 카메라로 사용자가 약을 복용하는 모습이 확인되었습니다. "
-                    "잘하셨다고 따뜻하게 칭찬하고 격려해주세요."
-                )
+                nudge = result["nudge_text"]
                 await websocket.send_json({"type": "system_nudge", "text": nudge})
                 await nudge_input_queue.put(nudge)
 
-    vision_task = asyncio.create_task(vision_loop())
+    fall_task = asyncio.create_task(fall_vision_loop())
+    medication_task = asyncio.create_task(medication_vision_loop())
 
     try:
         await _run_gemini_session(websocket, gemini_client, audio_input_queue, video_input_queue, text_input_queue, nudge_input_queue)
     except Exception as e:
-        logger.error(f"[/medication] session error: {type(e).__name__}: {e}")
+        logger.error(f"[/unified] session error: {type(e).__name__}: {e}")
     finally:
         receive_task.cancel()
-        vision_task.cancel()
-        greet_task.cancel()
-        try:
-            await websocket.close()
-        except Exception:
-            pass
-
-
-# ──────────────────────────────────────────────────────────────
-# /ws/task — 단순 VLM 대화 (감지 로직 없음)
-# ──────────────────────────────────────────────────────────────
-@app.websocket("/ws/task")
-async def ws_task(websocket: WebSocket):
-    await websocket.accept()
-    logger.info("[/task] WebSocket connection accepted")
-
-    audio_input_queue = asyncio.Queue()
-    video_input_queue = asyncio.Queue()
-    text_input_queue = asyncio.Queue()
-
-    gemini_client = GeminiLive(
-        api_key=GEMINI_API_KEY,
-        model=GEMINI_MODEL,
-        input_sample_rate=16000,
-        system_instruction=TASK_PERSONA,
-    )
-
-    receive_task = asyncio.create_task(
-        _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, None)
-    )
-
-    try:
-        await _run_gemini_session(websocket, gemini_client, audio_input_queue, video_input_queue, text_input_queue, None)
-    except Exception as e:
-        logger.error(f"[/task] session error: {type(e).__name__}: {e}")
-    finally:
-        receive_task.cancel()
+        fall_task.cancel()
+        medication_task.cancel()
+        if _active_unified_session["queue"] is nudge_input_queue:
+            _active_unified_session["queue"] = None
+            _active_unified_session["websocket"] = None
         try:
             await websocket.close()
         except Exception:

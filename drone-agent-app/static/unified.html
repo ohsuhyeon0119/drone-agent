@@ -3,25 +3,23 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>동행이 — 낙상 감지</title>
+<title>동행이 — 통합</title>
 <link rel="stylesheet" href="/static/shared.css" />
+<style>
+  .alert-overlay.good { background: rgba(31, 122, 104, 0.92); }
+</style>
 </head>
 <body>
   <div id="toast-container"></div>
 
   <div class="topnav">
     <div class="brand"><span class="dot"></span> 동행이</div>
-    <div class="tabs">
-      <a href="/fall" class="active">낙상 감지</a>
-      <a href="/medication">약 복용</a>
-      <a href="/task">작업 보조</a>
-    </div>
   </div>
 
   <div class="page-header">
-    <p class="eyebrow">시나리오 A · 긴급 상황</p>
-    <h1>넘어지면, 먼저 말을 겁니다</h1>
-    <p>대화 중 카메라가 낙상을 감지하면 동행이가 스스로 먼저 괜찮은지 묻고, 필요하면 119 신고까지 이어갑니다.</p>
+    <p class="eyebrow">노인 돌봄 드론 에이전트</p>
+    <h1>어떤 상황인지, 동행이가 스스로 알아챕니다</h1>
+    <p>낙상·복약·일반 대화를 한 세션에서 동시에 감지하고 알맞게 반응합니다.</p>
   </div>
 
   <div class="main-grid cols-3">
@@ -30,12 +28,16 @@
       <div class="video-wrap">
         <video id="video" autoplay playsinline muted></video>
         <div class="placeholder" id="video-placeholder">대화를 시작하면 카메라가 켜집니다</div>
-        <div class="alert-overlay" id="alert-overlay">🚨 낙상 감지! 확인이 필요합니다</div>
+        <div class="alert-overlay" id="fall-alert-overlay">🚨 낙상 감지! 확인이 필요합니다</div>
+        <div class="alert-overlay good" id="med-alert-overlay">✅ 복용 확인! 메모리에 기록했습니다</div>
       </div>
       <div class="controls">
         <button id="startBtn" class="btn primary">대화 시작</button>
         <button id="stopBtn" class="btn danger" disabled>종료</button>
         <span class="status-pill" id="statusPill"><span class="dot"></span> 대기 중</span>
+      </div>
+      <div class="controls">
+        <button id="medReminderBtn" class="btn">💊 약 복용 알림 (5초 후)</button>
       </div>
     </div>
 
@@ -49,8 +51,10 @@
     </div>
 
     <div class="card">
-      <h2>감지 로그</h2>
-      <div class="event-log" id="eventLog"></div>
+      <h2>감지 로그 (낙상 + 복약 동시)</h2>
+      <div class="event-log" id="eventLog" style="flex: 1.3"></div>
+      <h2 style="margin-top: 12px">메모리 업데이트</h2>
+      <div class="event-log" id="memoryLog" style="flex: 0.7"></div>
     </div>
   </div>
 
@@ -61,12 +65,15 @@
 <script>
 const video = document.getElementById("video");
 const videoPlaceholder = document.getElementById("video-placeholder");
-const alertOverlay = document.getElementById("alert-overlay");
+const fallAlertOverlay = document.getElementById("fall-alert-overlay");
+const medAlertOverlay = document.getElementById("med-alert-overlay");
 const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
+const medReminderBtn = document.getElementById("medReminderBtn");
 const statusPill = document.getElementById("statusPill");
 const chatLog = document.getElementById("chatLog");
 const eventLog = document.getElementById("eventLog");
+const memoryLog = document.getElementById("memoryLog");
 const textInput = document.getElementById("textInput");
 const sendBtn = document.getElementById("sendBtn");
 
@@ -75,7 +82,7 @@ let currentUserDiv = null;
 let currentGeminiDiv = null;
 
 const client = new GeminiClient({
-  wsPath: "/ws/fall",
+  wsPath: "/ws/unified",
   onOpen: async () => {
     statusPill.textContent = "연결됨";
     statusPill.classList.add("connected");
@@ -84,7 +91,6 @@ const client = new GeminiClient({
 
     await mediaHandler.startAudio((data) => client.send(data));
     await mediaHandler.startVideo(video, (base64) => client.sendImage(base64));
-    videoPlaceholder.classList.add("hidden");
     videoPlaceholder.style.display = "none";
   },
   onMessage: (event) => {
@@ -120,8 +126,8 @@ function handleJson(msg) {
   } else if (msg.type === "gemini") {
     currentGeminiDiv = appendMsg("gemini", msg.text, currentGeminiDiv);
   } else if (msg.type === "alert") {
-    alertOverlay.classList.add("show");
-    setTimeout(() => alertOverlay.classList.remove("show"), 4000);
+    fallAlertOverlay.classList.add("show");
+    setTimeout(() => fallAlertOverlay.classList.remove("show"), 4000);
   } else if (msg.type === "system_nudge") {
     appendMsg("system-nudge", "⚙️ " + msg.text);
   } else if (msg.type === "tool_call") {
@@ -131,6 +137,10 @@ function handleJson(msg) {
     }
   } else if (msg.type === "detect_result") {
     appendEventLog(msg);
+  } else if (msg.type === "memory_update") {
+    medAlertOverlay.classList.add("show");
+    setTimeout(() => medAlertOverlay.classList.remove("show"), 4000);
+    addMemoryLine(msg.message);
   }
 }
 
@@ -165,17 +175,26 @@ function appendMsg(cls, text, existing) {
 function appendEventLog(msg) {
   const line = document.createElement("div");
   const t = new Date().toLocaleTimeString();
+  const tag = msg.source === "fall" ? "🚨낙상" : "💊복약";
   if (msg.ok) {
-    const hit = msg.event === "fall";
+    const hit = msg.event === "fall" || msg.event === "taken";
     line.className = "line" + (hit ? " hit" : "");
-    line.textContent = `[${t}] event=${msg.event} conf=${msg.confidence} — ${msg.reason || ""}`;
+    line.textContent = `[${t}] ${tag} event=${msg.event} conf=${msg.confidence} — ${msg.reason || ""}`;
   } else {
     line.className = "line";
-    line.textContent = `[${t}] ERROR: ${msg.error}`;
+    line.textContent = `[${t}] ${tag} ERROR: ${msg.error}`;
   }
   eventLog.appendChild(line);
   eventLog.scrollTop = eventLog.scrollHeight;
-  while (eventLog.children.length > 60) eventLog.removeChild(eventLog.firstChild);
+  while (eventLog.children.length > 80) eventLog.removeChild(eventLog.firstChild);
+}
+
+function addMemoryLine(text) {
+  const line = document.createElement("div");
+  line.className = "line good";
+  line.textContent = text;
+  memoryLog.appendChild(line);
+  memoryLog.scrollTop = memoryLog.scrollHeight;
 }
 
 startBtn.onclick = async () => {
@@ -188,6 +207,31 @@ stopBtn.onclick = () => {
   mediaHandler.stopAudio();
   mediaHandler.stopVideo(video);
   videoPlaceholder.style.display = "flex";
+};
+
+const MED_BTN_DEFAULT_LABEL = "💊 약 복용 알림 (5초 후)";
+medReminderBtn.onclick = () => {
+  medReminderBtn.disabled = true;
+  let secondsLeft = 5;
+  medReminderBtn.textContent = `💊 ${secondsLeft}초 후 알림...`;
+  const interval = setInterval(async () => {
+    secondsLeft -= 1;
+    if (secondsLeft > 0) {
+      medReminderBtn.textContent = `💊 ${secondsLeft}초 후 알림...`;
+      return;
+    }
+    clearInterval(interval);
+    try {
+      const res = await fetch("/api/remind-medication", { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) alert(data.error || "전송 실패");
+    } catch (e) {
+      alert("요청 실패: " + e.message);
+    } finally {
+      medReminderBtn.disabled = false;
+      medReminderBtn.textContent = MED_BTN_DEFAULT_LABEL;
+    }
+  }, 1000);
 };
 
 sendBtn.onclick = sendText;

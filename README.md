@@ -16,7 +16,7 @@
 
 ```mermaid
 flowchart LR
-    A["웹캠 프레임\n(1fps)"] --> B["Groq VLM\n(OpenRouter 경유)\n2초마다 이벤트 판정"]
+    A["웹캠 프레임\n(1fps)"] --> B["LangGraph 감지 파이프라인\nGroq VLM(OpenRouter 경유)\n2초마다 이벤트 판정"]
     B -- "이벤트 감지됨" --> C["send_client_content\n(turn_complete=True)"]
     C --> D["Gemini Live 세션\n누적된 오디오·영상 컨텍스트로\n자연스럽게 먼저 발화"]
     D -- "필요시" --> E["tool call\n(예: notify_caregiver)"]
@@ -25,19 +25,23 @@ flowchart LR
 감지(무엇을 볼지)와 발화(어떻게 반응할지)를 의도적으로 분리했다 — 감지는 저렴하고 빠른
 전용 VLM(Groq)이, 대화와 판단은 문맥을 유지하는 Gemini Live 세션이 담당한다.
 
-## 3가지 시나리오
+## 하나의 세션, 여러 감지기
 
-`drone-agent-app`은 이 메커니즘을 세 가지 실제 상황에 적용한다. 각각 독립된 페이지
-(`/fall`, `/medication`, `/task`)이고, 우측 상단 탭으로 전환한다.
+처음엔 시나리오별로 탭을 나눠 페이지 3개를 만들었지만, 지금은 **하나의 통합 세션 안에서
+낙상 감지기와 복약 감지기가 동시에** 돈다 — 사람이 "지금은 낙상 모드"라고 미리 고르지 않고,
+카메라가 보는 상황에 맞춰 동행이가 알아서 반응한다. 두 감지기 모두 같은 LangGraph
+파이프라인(`detection_graph.py`: Detect → Decide → Nudge)을 프롬프트·타겟이벤트·쿨다운만
+다르게 넣어서 재사용한다.
 
-| 시나리오 | 트리거 | 반응 |
-|---|---|---|
-| **낙상 감지** (`/fall`) | 대화 중 카메라가 낙상 자세를 감지 | "괜찮으세요?"라고 먼저 물음 → 응답에 따라 `notify_caregiver` tool 호출(119 신고 알림) 또는 안심시키고 종료 |
-| **약 복용 확인** (`/medication`) | 연결 직후, 저장된 처방 정보(`memory.json`) 기준으로 즉시 | "OO님, 20시입니다. 혈압약 드셔야 해요"라고 먼저 안내 → 복용 동작 감지되면 메모리에 기록하고 칭찬, 대시보드에 실시간 표시 |
-| **작업 보조** (`/task`) | 사용자가 직접 질문 | 감지 로직 없이 카메라로 보이는 것에 대해 자연스럽게 답하는 단순 VLM 대화 |
+| 감지되는 상황 | 반응 |
+|---|---|
+| 낙상 자세 감지 | "괜찮으세요?"라고 먼저 물음 → 응답에 따라 `notify_caregiver` tool 호출(119 신고 알림) 또는 안심시키고 종료 |
+| 복약 확인(카메라) | 복용 동작 감지되면 메모리(`memory.json`)에 기록하고 칭찬, 화면에 실시간 표시 |
+| 복약 알림(수동) | 화면의 "약 복용 알림" 버튼 → 5초 카운트다운 → 저장된 처방 정보 기준으로 먼저 복약을 안내 |
+| 그 외 일반 대화 | 감지 이벤트 없이도 카메라로 보이는 것에 대해 자연스럽게 답하는 대화 가능 |
 
-세 시나리오는 하나의 공통 페르소나("동행이")를 공유한다 — 카메라로 보고 목소리로만
-말할 수 있고, 팔다리가 없어 물건을 직접 다룰 수 없다는 제약도 명시돼 있다.
+공통 페르소나("동행이")는 카메라로 보고 목소리로만 말할 수 있고, 팔다리가 없어 물건을
+직접 다룰 수 없다는 제약도 명시돼 있다.
 
 ## 왜 Groq/OpenRouter를 같이 쓰는가
 
@@ -55,15 +59,16 @@ life-knowledge/
 ├── root_readme.md              # 원본 기획 문서 (핵심 시나리오 정의)
 ├── README.md                   # 이 문서
 └── drone-agent-app/            # 실제 구현체
-    ├── main.py                 # FastAPI 앱 — 3개 라우트 + 3개 WebSocket 핸들러
-    ├── gemini_live.py           # Gemini Live API 세션 래퍼 (강제 턴 발생 메커니즘 포함)
-    ├── memory.py                 # 약 복용 시나리오용 JSON 메모리 저장소
+    ├── main.py                 # FastAPI 앱 — 라우트 1개 + WebSocket 핸들러 1개
+    ├── gemini_live.py            # Gemini Live API 세션 래퍼 (강제 턴 발생 메커니즘 포함)
+    ├── detection_graph.py        # LangGraph 기반 감지 파이프라인 (Detect→Decide→Nudge)
+    ├── memory.py                  # 약 복용 시나리오용 JSON 메모리 저장소
     ├── static/
-    │   ├── shared.css            # 3페이지 공통 디자인 시스템
-    │   ├── gemini-client.js       # WebSocket 클라이언트 (페이지별 경로 설정 가능)
-    │   ├── media-handler.js       # 마이크/카메라 캡처 (오디오 스트리밍 + 1fps 영상 캡처)
-    │   └── fall.html / medication.html / task.html
-    └── README.md                 # 시나리오별 요약 + 실행 방법
+    │   ├── unified.html            # 유일한 페이지 (카메라 + 대화 + 감지·메모리 로그)
+    │   ├── shared.css               # 디자인 시스템
+    │   ├── gemini-client.js          # WebSocket 클라이언트
+    │   └── media-handler.js          # 마이크/카메라 캡처 (오디오 스트리밍 + 1fps 영상 캡처)
+    └── README.md                  # 상세 동작 방식 + 실행 방법
 ```
 
 ## 실행
@@ -85,3 +90,6 @@ python main.py          # http://localhost:8003
 - 낙상/복용 감지는 정지 프레임 판정이라 "동작 자체"보다는 "그 순간의 자세"를 봄 —
   더 정교하게 만들려면 모션 감지로 이벤트 구간을 잡고 여러 프레임을 함께 판정하는
   방식(Lifenology에서 검증된 방식)으로 확장 가능
+- 시나리오·tool이 아직 코드에 하드코딩돼 있음 — 노인별로 다른 시나리오/대응 정책을
+  설정으로 관리하는 레지스트리 구조, 그리고 그걸 보여주는 모니터링 페이지는
+  설계까지만 하고 구현 전 (`drone-agent-app/README.md`의 "다음 단계" 참고)
