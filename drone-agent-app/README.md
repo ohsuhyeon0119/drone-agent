@@ -51,10 +51,27 @@ tool을 스스로 호출한다.
 ## 실행
 
 ```bash
-pip install -r requirements.txt
-cp .env.example .env   # GEMINI_API_KEY, OPEN_ROUTER_KEY 채우기
-python main.py          # http://localhost:8003
+pip install -r requirements.txt   # fastapi uvicorn python-dotenv google-genai openai langgraph websockets
+cp .env.example .env              # GEMINI_API_KEY, OPEN_ROUTER_KEY 채우기 (PHONE_STREAM_URL은 선택)
+python main.py                    # http://localhost:8003
 ```
+
+## 영상 소스: 브라우저 웹캠 + 폰 스트림 (스마트 폴백)
+
+기본은 브라우저 웹캠/마이크(getUserMedia)다. `.env`에 `PHONE_STREAM_URL`을 설정하면
+phone-stream 서버의 폰(드론 카메라) 피드가 **송출 중일 때만** 자동으로 모델 입력이 되고,
+송출이 없으면 브라우저 입력을 그대로 쓴다 — 페이지 하나로 두 사용법이 공존한다.
+
+```
+PHONE_STREAM_URL=http://localhost:8080   # 같은 서버에 배포된 경우
+```
+
+- 서버의 `WS /ws/feed`를 구독해 영상(JPEG)은 `frame_buffer`(감지 VLM, 매 프레임)와
+  Gemini Live(~1fps 제한)에, 오디오(16kHz PCM)는 Gemini Live에 주입한다 (`_pump_phone_stream`).
+- 폰 패킷이 최근 3초(`PHONE_ACTIVE_WINDOW`) 안에 들어왔으면 브라우저의 웹캠
+  이미지·마이크 오디오는 무시(이중 입력 방지), 아니면 브라우저 입력 사용.
+- 연결이 끊기면 3초 간격으로 자동 재접속. 비우면 항상 브라우저 방식.
+- `/ws/unified` 세션 하나에 통합돼 있다 — 낙상·복약 감지기 둘 다 이 영상 소스를 그대로 공유한다.
 
 ## 다음 단계 (설계만 하고 아직 미구현)
 

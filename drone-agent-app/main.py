@@ -1,15 +1,15 @@
 """
-동행이 — 노인 돌봄 드론 에이전트 PoC, 3개 시나리오 통합 앱.
+동행이 — 노인 돌봄 드론 에이전트 PoC.
 
-/fall        긴급 상황: 낙상 감지 → 프로액티브 발화 → 119 신고(tool call)
-/medication  약 복용: 프로액티브 인사 → 복용 감지 → 메모리 기록 → 대시보드 표시
-/task        작업 보조: 단순 VLM 대화 (감지 로직 없음)
+/ (=/unified) 하나의 페이지·하나의 WebSocket 세션(/ws/unified)에서 낙상 감지와
+복약 확인을 동시에 처리한다. 두 감지기 모두 "감지 → 판단 → 넛지" 파이프라인
+(detection_graph.py, LangGraph로 구현)을 프롬프트·타겟이벤트·쿨다운만 다르게
+넣어서 공유하고, 감지되면 nudge_input_queue를 통해 Gemini Live(gemini_live.py)에
+강제로 턴을 발생시켜 스스로 먼저 말을 걸게 만든다.
 
-세 페이지 모두 Gemini Live API(음성 대화, gemini_live.py)를 공유하고,
-/fall·/medication은 추가로 "감지 → 판단 → 넛지" 파이프라인(detection_graph.py,
-LangGraph로 구현)을 돌려 감지되면 nudge_input_queue를 통해 Gemini Live에
-강제로 턴을 발생시킨다. 이 두 시나리오는 detection_graph만 공유하고
-프롬프트·타겟 이벤트·쿨다운·넛지 문구만 다르게 넣는다.
+영상·오디오 입력은 기본적으로 브라우저 getUserMedia를 쓰지만, PHONE_STREAM_URL이
+설정돼 있으면 phone-stream 서버(폰 카메라/마이크)가 송출 중일 때 그쪽을 우선
+사용하고 아니면 브라우저로 자동 폴백한다 (_pump_phone_stream, _phone_is_active).
 """
 
 import asyncio
@@ -17,6 +17,7 @@ import base64
 import json
 import logging
 import os
+import time
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -36,6 +37,17 @@ logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("MODEL", "gemini-3.1-flash-live-preview")
+
+# 폰 스트림 소스 (phone-stream 서버, 예: http://localhost:8080)
+# 설정하면 폰(드론 카메라)이 송출 중일 때 그 영상·오디오가 모델 입력이 되고,
+# 송출이 없으면 자동으로 브라우저 웹캠/마이크로 폴백한다 (스마트 전환).
+# 비우면 항상 브라우저 getUserMedia만 사용.
+PHONE_STREAM_URL = os.getenv("PHONE_STREAM_URL", "").strip().rstrip("/")
+# Gemini Live에 넣는 영상은 기존 브라우저 경로와 동일하게 ~1fps로 제한
+# (frame_buffer는 매 프레임 갱신 — 감지 VLM은 항상 최신 프레임을 본다)
+PHONE_VIDEO_TO_GEMINI_INTERVAL = 1.0
+# 폰 패킷이 이 시간(초) 안에 들어왔으면 "폰 송출 중"으로 보고 브라우저 입력을 무시
+PHONE_ACTIVE_WINDOW = 3.0
 
 # ──────────────────────────────────────────────────────────────
 # 공통 페르소나
@@ -198,21 +210,35 @@ async def _run_gemini_session(
             await websocket.send_json(event)
 
 
-async def _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, frame_buffer):
+def _phone_is_active(phone_active: dict | None) -> bool:
+    """폰(드론 카메라)이 최근 PHONE_ACTIVE_WINDOW초 안에 패킷을 보냈는지."""
+    return (
+        phone_active is not None
+        and time.monotonic() - phone_active["last"] < PHONE_ACTIVE_WINDOW
+    )
+
+
+async def _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, frame_buffer,
+                               phone_active=None):
+    """브라우저 → 모델 입력. 폰(드론 카메라)이 송출 중일 때만 브라우저의 마이크
+    오디오와 웹캠 이미지를 버리고(이중 입력 방지), 아니면 그대로 모델에 넣는다.
+    텍스트 메시지는 항상 통과."""
     try:
         while True:
             message = await websocket.receive()
             if message.get("bytes"):
-                await audio_input_queue.put(message["bytes"])
+                if not _phone_is_active(phone_active):
+                    await audio_input_queue.put(message["bytes"])
             elif message.get("text"):
                 text = message["text"]
                 try:
                     payload = json.loads(text)
                     if isinstance(payload, dict) and payload.get("type") == "image":
-                        image_data = base64.b64decode(payload["data"])
-                        await video_input_queue.put(image_data)
-                        if frame_buffer is not None:
-                            frame_buffer["data"] = image_data
+                        if not _phone_is_active(phone_active):
+                            image_data = base64.b64decode(payload["data"])
+                            await video_input_queue.put(image_data)
+                            if frame_buffer is not None:
+                                frame_buffer["data"] = image_data
                         continue
                 except json.JSONDecodeError:
                     pass
@@ -221,6 +247,52 @@ async def _receive_from_client(websocket, audio_input_queue, video_input_queue, 
         logger.info("WebSocket disconnected")
     except Exception as e:
         logger.error(f"Error receiving from client: {e}")
+
+
+async def _pump_phone_stream(audio_input_queue, video_input_queue, frame_buffer, phone_active):
+    """phone-stream 서버의 /ws/feed에 붙어 폰의 영상('V')/오디오('A')를 모델 입력에 주입.
+
+    패킷 포맷: [1B 'V'|'A'][8B LE float64 capture_ts_ms][payload]
+      - V: JPEG → frame_buffer(감지 VLM, 매 프레임) + video_input_queue(Gemini, ~1fps 제한)
+      - A: 16kHz 16bit 모노 PCM → audio_input_queue (브라우저 마이크와 동일 포맷)
+    패킷이 올 때마다 phone_active["last"]를 갱신해 브라우저 입력을 잠재운다.
+    끊기면 3초 간격으로 재접속한다.
+    """
+    import websockets
+
+    base = PHONE_STREAM_URL
+    if base.startswith("https://"):
+        feed_url = "wss://" + base[len("https://"):] + "/ws/feed"
+    elif base.startswith("http://"):
+        feed_url = "ws://" + base[len("http://"):] + "/ws/feed"
+    else:
+        feed_url = base + "/ws/feed"
+
+    last_video_to_gemini = 0.0
+    while True:
+        try:
+            async with websockets.connect(feed_url, max_size=None) as ws:
+                logger.info(f"phone-stream feed 연결됨: {feed_url}")
+                async for data in ws:
+                    if not isinstance(data, (bytes, bytearray)) or len(data) < 10:
+                        continue
+                    kind, payload = data[0:1], bytes(data[9:])
+                    if kind == b"V":
+                        phone_active["last"] = time.monotonic()
+                        if frame_buffer is not None:
+                            frame_buffer["data"] = payload
+                        now = time.monotonic()
+                        if now - last_video_to_gemini >= PHONE_VIDEO_TO_GEMINI_INTERVAL:
+                            last_video_to_gemini = now
+                            await video_input_queue.put(payload)
+                    elif kind == b"A":
+                        phone_active["last"] = time.monotonic()
+                        await audio_input_queue.put(payload)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"phone-stream feed 끊김/실패, 3초 후 재시도: {type(e).__name__}: {e}")
+        await asyncio.sleep(3)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -254,9 +326,14 @@ async def ws_unified(websocket: WebSocket):
         system_instruction=UNIFIED_PERSONA,
     )
 
+    phone_active = {"last": 0.0}
     receive_task = asyncio.create_task(
-        _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, frame_buffer)
+        _receive_from_client(websocket, audio_input_queue, video_input_queue, text_input_queue, frame_buffer,
+                             phone_active)
     )
+    phone_task = asyncio.create_task(
+        _pump_phone_stream(audio_input_queue, video_input_queue, frame_buffer, phone_active)
+    ) if PHONE_STREAM_URL else None
 
     # 약 복용 알림은 자동 발화 대신 프론트의 "약 복용 알림" 버튼(5초 카운트다운
     # 후 /api/remind-medication 호출)으로 트리거한다 — 데모 중 원치 않는 타이밍에
@@ -354,6 +431,8 @@ async def ws_unified(websocket: WebSocket):
         receive_task.cancel()
         fall_task.cancel()
         medication_task.cancel()
+        if phone_task:
+            phone_task.cancel()
         if _active_unified_session["queue"] is nudge_input_queue:
             _active_unified_session["queue"] = None
             _active_unified_session["websocket"] = None
