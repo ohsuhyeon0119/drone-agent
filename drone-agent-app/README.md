@@ -41,8 +41,9 @@ Gemini Live는 기본적으로 반응형이라 스스로 먼저 말하지 않는
 **3. 판단과 실행 — Gemini Live 세션 내부**
 
 "낙상이면 괜찮은지 묻고 필요하면 119"나 "복약 확인되면 칭찬"같은 판단은
-전부 시스템 프롬프트(`UNIFIED_PERSONA`)에 위임한다. 필요시 `notify_caregiver`
-tool을 스스로 호출한다. 페르소나·감지 프롬프트(`agent/persona.py`), tool 정의
+전부 시스템 프롬프트(연결마다 `agent/persona.py`가 조립하는 통합 페르소나)에
+위임한다. 필요시 `notify_caregiver` tool을 스스로 호출한다. 페르소나 조립
+(`agent/persona.py`), 감지 프롬프트·지침(`agent/scenarios.py`), tool 정의
 (`agent/tools.py`), 프론트엔드 JS(`agent/static/`)는 모두 `agent/` 아래 모여 있다.
 
 **4. 개인화 메모리 — `memory.py`**

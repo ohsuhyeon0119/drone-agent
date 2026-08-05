@@ -3,11 +3,14 @@
 시나리오별 대응 지침(낙상이면 어떻게, 복약이면 어떻게)은 더 이상 여기 문자열로
 박혀 있지 않고 `agent/scenarios.py`(→ `agent/scenarios/<key>.yaml`)에서 온다.
 관리 화면에서 지침을 추가/삭제하는 기능은 결국 그 yaml 파일을 고치는 것이고,
-파일이 없거나 잘못돼도 `scenarios.py`의 DEFAULT_SCENARIOS로 안전하게 대체되므로
-이 모듈이 만드는 UNIFIED_PERSONA는 항상 지금까지와 동일한 방식으로 동작한다.
-"""
+파일이 없거나 잘못돼도 `scenarios.py`의 DEFAULT_SCENARIOS로 안전하게 대체된다.
 
-from agent.scenarios import load_scenarios
+`build_unified_persona()`는 일부러 모듈 임포트 시점에 한 번만 계산해두지
+않는다 — yaml을 고친 뒤 서버 프로세스 전체를 재시작하지 않아도, 다음
+`/ws/unified` 연결(세션 재시작)부터 바로 반영되게 하려면 매 연결마다
+`load_scenarios()`를 새로 호출해서 최신 파일 내용을 읽어야 하기 때문이다.
+호출부(`main.py`)가 이 두 함수를 연결 시점에 직접 호출한다.
+"""
 
 PERSONA_BASE = """당신의 이름은 '동행이'입니다. 노인 곁을 지키는 돌봄 드론 에이전트입니다.
 항상 다정하고 차분한 존댓말을 쓰고, 문장은 짧고 명확하게 말합니다. 서두르지 않습니다.
@@ -47,12 +50,3 @@ def build_unified_persona(scenarios: dict) -> str:
         "물어보면 카메라로 보이는 것을 근거로 쉽고 친절하게 설명해주세요.\n\n"
         "여러 신호가 겹치면 더 급한 것(낙상)을 우선하세요."
     )
-
-
-SCENARIOS = load_scenarios()
-UNIFIED_PERSONA = build_unified_persona(SCENARIOS)
-
-# main.py의 감지 루프가 쓰는 값들 — 지금은 SCENARIOS에서 그대로 뽑아 쓰지만,
-# 하위 호환을 위해 이름은 유지한다.
-FALL_DETECT_PROMPT = SCENARIOS["fall"]["detect_prompt"]
-MEDICATION_DETECT_PROMPT = SCENARIOS["medication"]["detect_prompt"]

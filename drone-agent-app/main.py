@@ -26,7 +26,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import memory
-from agent.persona import SCENARIOS, UNIFIED_PERSONA
+from agent.persona import build_unified_persona
+from agent.scenarios import load_scenarios
 from agent.tools import NOTIFY_CAREGIVER_TOOL, notify_caregiver
 from detection_graph import detection_graph
 from gemini_live import GeminiLive
@@ -109,6 +110,30 @@ async def remind_medication():
     await queue.put(nudge)
     logger.info("[/api/remind-medication] 복약 알림 넛지 주입됨")
     return {"ok": True}
+
+
+@app.post("/api/scenarios/reload")
+async def reload_scenarios():
+    """agent/scenarios/*.yaml을 고친 뒤 누르는 "적용" 버튼이 여기로 들어온다.
+
+    Gemini Live는 세션 시작 시점에만 persona/tool을 고정할 수 있어서, 이미
+    떠 있는 세션의 내용 자체를 바꿔치기할 수는 없다. 대신 현재 연결된 세션이
+    있으면 끊어서 재연결을 유도한다 — /ws/unified는 매 연결마다 yaml을 새로
+    읽으므로(main.py의 ws_unified 참고), 다시 "대화 시작"을 누르는 순간부터
+    새 지침이 반영된다. 연결된 세션이 없으면 어차피 다음 연결부터 바로
+    반영되니 그대로 안내만 한다.
+    """
+    ws = _active_unified_session["websocket"]
+    if ws is None:
+        return {"ok": True, "closed_session": False, "message": "연결된 세션이 없습니다. 새로 대화를 시작하면 바로 반영됩니다."}
+
+    # await로 기다리지 않는다 — 다른 요청(이 HTTP 요청) 핸들러에서 websocket을
+    # 닫으면 uvicorn이 종료 핸드셰이크를 정리하는 데 수십 초가 걸릴 수 있는데,
+    # 이 버튼은 그 정리가 끝나길 기다릴 필요 없이 "닫으라고 지시했다"만 즉시
+    # 응답하면 된다. 실제 정리/재연결 허용은 백그라운드에서 진행된다.
+    asyncio.create_task(ws.close())
+    logger.info("[/api/scenarios/reload] 지침 갱신을 위해 활성 세션 종료를 요청함")
+    return {"ok": True, "closed_session": True, "message": "현재 세션을 종료했습니다. 다시 '대화 시작'을 누르면 새 지침이 적용됩니다."}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -234,12 +259,18 @@ async def ws_unified(websocket: WebSocket):
 
     /fall·/medication은 사람이 탭으로 시나리오를 미리 골라야 하지만, 여기서는
     detection_graph를 낙상용·복약용으로 각각 병렬 실행해 같은 nudge_input_queue에
-    합류시킨다. Gemini에게는 세 시나리오를 다 아우르는 UNIFIED_PERSONA와
-    notify_caregiver tool을 준다 — "어떤 상황인지"는 코드가 미리 정하지 않고,
-    그때그때 어느 감지기가 먼저 걸리느냐로 자연스럽게 결정된다.
+    합류시킨다. Gemini에게는 세 시나리오를 다 아우르는 통합 페르소나(매 연결마다
+    agent/scenarios/*.yaml을 새로 읽어 조립)와 notify_caregiver tool을 준다 —
+    "어떤 상황인지"는 코드가 미리 정하지 않고, 그때그때 어느 감지기가 먼저
+    걸리느냐로 자연스럽게 결정된다.
     """
     await websocket.accept()
     logger.info("[/unified] WebSocket connection accepted")
+
+    # agent/scenarios/*.yaml을 연결마다 새로 읽는다 — 서버 프로세스를 재시작하지
+    # 않아도 지침을 고친 뒤 세션을 새로 시작하면(재연결하면) 바로 반영되게 하기 위함.
+    scenarios = load_scenarios()
+    unified_persona = build_unified_persona(scenarios)
 
     audio_input_queue = asyncio.Queue()
     video_input_queue = asyncio.Queue()
@@ -253,7 +284,7 @@ async def ws_unified(websocket: WebSocket):
         input_sample_rate=16000,
         tools=[NOTIFY_CAREGIVER_TOOL],
         tool_mapping={"notify_caregiver": notify_caregiver},
-        system_instruction=UNIFIED_PERSONA,
+        system_instruction=unified_persona,
     )
 
     phone_active = {"last": 0.0}
@@ -272,7 +303,7 @@ async def ws_unified(websocket: WebSocket):
     _active_unified_session["websocket"] = websocket
 
     async def fall_vision_loop():
-        scenario = SCENARIOS["fall"]
+        scenario = scenarios["fall"]
         last_trigger_at = 0.0
         while True:
             await asyncio.sleep(2)
@@ -307,7 +338,7 @@ async def ws_unified(websocket: WebSocket):
                 await nudge_input_queue.put(nudge)
 
     async def medication_vision_loop():
-        scenario = SCENARIOS["medication"]
+        scenario = scenarios["medication"]
         last_trigger_at = 0.0
         while True:
             await asyncio.sleep(2)
