@@ -20,7 +20,7 @@ class MediaHandler {
       this.audioContext = new (window.AudioContext ||
         window.webkitAudioContext)();
       await this.audioContext.audioWorklet.addModule(
-        "/static/pcm-processor.js"
+        "/agent-static/pcm-processor.js"
       );
     }
     if (this.audioContext.state === "suspended") {
