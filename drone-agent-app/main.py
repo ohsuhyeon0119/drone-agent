@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import memory
-from agent.persona import FALL_DETECT_PROMPT, MEDICATION_DETECT_PROMPT, UNIFIED_PERSONA
+from agent.persona import SCENARIOS, UNIFIED_PERSONA
 from agent.tools import NOTIFY_CAREGIVER_TOOL, notify_caregiver
 from detection_graph import detection_graph
 from gemini_live import GeminiLive
@@ -272,6 +272,7 @@ async def ws_unified(websocket: WebSocket):
     _active_unified_session["websocket"] = websocket
 
     async def fall_vision_loop():
+        scenario = SCENARIOS["fall"]
         last_trigger_at = 0.0
         while True:
             await asyncio.sleep(2)
@@ -280,14 +281,11 @@ async def ws_unified(websocket: WebSocket):
                 continue
             result = await detection_graph.ainvoke({
                 "frame": frame,
-                "prompt": FALL_DETECT_PROMPT,
-                "target_event": "fall",
-                "cooldown": 10.0,
+                "prompt": scenario["detect_prompt"],
+                "target_event": scenario["target_event"],
+                "cooldown": scenario["cooldown"],
                 "last_trigger_at": last_trigger_at,
-                "nudge_template": (
-                    "[SYSTEM] 카메라 영상에서 사용자가 방금 쓰러지는 것이 감지되었습니다. "
-                    "지금 하던 대화를 멈추고 걱정스러운 톤으로 '괜찮으세요?'라고 즉시 물어보세요."
-                ),
+                "nudge_template": scenario["nudge_template"],
             })
             if result.get("error"):
                 logger.error(f"[/unified:fall] detect error: {result['error']}")
@@ -309,6 +307,7 @@ async def ws_unified(websocket: WebSocket):
                 await nudge_input_queue.put(nudge)
 
     async def medication_vision_loop():
+        scenario = SCENARIOS["medication"]
         last_trigger_at = 0.0
         while True:
             await asyncio.sleep(2)
@@ -317,14 +316,11 @@ async def ws_unified(websocket: WebSocket):
                 continue
             result = await detection_graph.ainvoke({
                 "frame": frame,
-                "prompt": MEDICATION_DETECT_PROMPT,
-                "target_event": "taken",
-                "cooldown": 15.0,
+                "prompt": scenario["detect_prompt"],
+                "target_event": scenario["target_event"],
+                "cooldown": scenario["cooldown"],
                 "last_trigger_at": last_trigger_at,
-                "nudge_template": (
-                    "[SYSTEM] 방금 카메라로 사용자가 약을 복용하는 모습이 확인되었습니다. "
-                    "잘하셨다고 따뜻하게 칭찬하고 격려해주세요."
-                ),
+                "nudge_template": scenario["nudge_template"],
             })
             if result.get("error"):
                 logger.error(f"[/unified:medication] detect error: {result['error']}")

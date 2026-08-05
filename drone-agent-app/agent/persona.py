@@ -1,4 +1,13 @@
-"""동행이의 페르소나(시스템 지침)와 감지용 프롬프트."""
+"""동행이의 페르소나(시스템 지침)를 구성한다.
+
+시나리오별 대응 지침(낙상이면 어떻게, 복약이면 어떻게)은 더 이상 여기 문자열로
+박혀 있지 않고 `agent/scenarios.py`(→ `agent/scenarios/<key>.yaml`)에서 온다.
+관리 화면에서 지침을 추가/삭제하는 기능은 결국 그 yaml 파일을 고치는 것이고,
+파일이 없거나 잘못돼도 `scenarios.py`의 DEFAULT_SCENARIOS로 안전하게 대체되므로
+이 모듈이 만드는 UNIFIED_PERSONA는 항상 지금까지와 동일한 방식으로 동작한다.
+"""
+
+from agent.scenarios import load_scenarios
 
 PERSONA_BASE = """당신의 이름은 '동행이'입니다. 노인 곁을 지키는 돌봄 드론 에이전트입니다.
 항상 다정하고 차분한 존댓말을 쓰고, 문장은 짧고 명확하게 말합니다. 서두르지 않습니다.
@@ -13,35 +22,37 @@ PERSONA_BASE = """당신의 이름은 '동행이'입니다. 노인 곁을 지키
 받으면 지금 하던 대화를 자연스럽게 멈추고 그 상황에 맞게 먼저 말을 걸거나 확인 질문을
 하세요. '[SYSTEM]' 문구 자체를 사용자에게 그대로 읽거나 언급하지 마세요."""
 
-# 세 시나리오(낙상/복약/그 외 일반 대화)를 하나의 세션에서 동시에 처리하는 페르소나.
-# 어떤 [SYSTEM] 신호가 오든 그때그때 알아서 대응하고, 아무 신호가 없을 때는
-# 자유로운 대화/작업 보조 역할을 한다.
-UNIFIED_PERSONA = (
-    PERSONA_BASE
-    + """
 
-당신은 세 가지 상황을 동시에 대비합니다 — 무슨 상황인지는 당신이 미리 아는 게
-아니라, 그때그때 받는 [SYSTEM] 신호로 알게 됩니다:
+def _render_scenario_block(index: int, scenario: dict) -> str:
+    bullets = "\n".join(f"   - {line}" for line in scenario["instructions"])
+    return f"{index}. {scenario['name']} 신호를 받으면:\n{bullets}"
 
-1. 낙상 감지 신호를 받으면: 즉시 걱정스러운 톤으로 "괜찮으세요?"라고 묻고 119 신고
-   여부를 확인하세요. 사용자가 신고를 원하거나, 괜찮지 않다고 답하거나, 응답이 없으면
-   notify_caregiver 도구를 호출하세요. 명확히 괜찮다고 하면 신고하지 말고 안심시키세요.
-2. 복약 시간 또는 복약 확인 신호를 받으면: 처방 정보를 바탕으로 먼저 다정하게
-   복용을 권하거나(시간 안내 신호), 복용이 확인됐으면 "잘하셨어요!"처럼 칭찬하세요
-   (아직 안 먹었다면 부드럽게 다시 권유).
-3. 그 외에는: 평소처럼 자유롭게 대화하거나, 사용자가 화면·물건에 대해 물어보면
-   카메라로 보이는 것을 근거로 쉽고 친절하게 설명해주세요.
 
-여러 신호가 겹치면 더 급한 것(낙상)을 우선하세요."""
-)
+def build_unified_persona(scenarios: dict) -> str:
+    """PERSONA_BASE + 시나리오별 지침을 하나의 시스템 프롬프트로 합친다.
 
-FALL_DETECT_PROMPT = """이 이미지를 보고 사람이 엎드려 있거나 넘어져 있는지 감지하라.
-반드시 아래 JSON 형식으로만 답하라, 코드펜스 금지:
-{"event": "fall" 또는 "none", "confidence": 0.0~1.0, "reason": "판단 근거를 한 문장으로"}
-"""
+    어떤 [SYSTEM] 신호가 오든 그때그때 알아서 대응하고, 아무 신호가 없을 때는
+    자유로운 대화/작업 보조 역할을 한다는 큰 틀은 그대로 두고, 시나리오
+    지침 부분만 `scenarios`(agent/scenarios.py, yaml로 오버라이드 가능)에서
+    가져와 번호를 매겨 채워 넣는다.
+    """
+    blocks = [_render_scenario_block(i, s) for i, s in enumerate(scenarios.values(), start=1)]
+    other_index = len(blocks) + 1
+    return (
+        PERSONA_BASE
+        + "\n\n당신은 아래 상황들을 동시에 대비합니다 — 무슨 상황인지는 당신이 미리 아는 게 "
+        "아니라, 그때그때 받는 [SYSTEM] 신호로 알게 됩니다:\n\n"
+        + "\n\n".join(blocks)
+        + f"\n\n{other_index}. 그 외에는: 평소처럼 자유롭게 대화하거나, 사용자가 화면·물건에 대해 "
+        "물어보면 카메라로 보이는 것을 근거로 쉽고 친절하게 설명해주세요.\n\n"
+        "여러 신호가 겹치면 더 급한 것(낙상)을 우선하세요."
+    )
 
-MEDICATION_DETECT_PROMPT = """이 이미지를 보고 사람이 알약이나 물컵을 입 근처로 가져가
-약을 복용하는 동작을 하고 있는지 감지하라.
-반드시 아래 JSON 형식으로만 답하라, 코드펜스 금지:
-{"event": "taken" 또는 "none", "confidence": 0.0~1.0, "reason": "판단 근거를 한 문장으로"}
-"""
+
+SCENARIOS = load_scenarios()
+UNIFIED_PERSONA = build_unified_persona(SCENARIOS)
+
+# main.py의 감지 루프가 쓰는 값들 — 지금은 SCENARIOS에서 그대로 뽑아 쓰지만,
+# 하위 호환을 위해 이름은 유지한다.
+FALL_DETECT_PROMPT = SCENARIOS["fall"]["detect_prompt"]
+MEDICATION_DETECT_PROMPT = SCENARIOS["medication"]["detect_prompt"]
