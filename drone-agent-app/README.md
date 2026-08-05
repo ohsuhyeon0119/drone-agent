@@ -27,7 +27,8 @@ AI가 스스로 먼저 말을 건다"는 동작을 구현했다.
 "프레임 → Detect(감지) → Decide(판단) → Nudge(문구 생성)" 3단계를 그래프로
 정의해두고, 낙상용·복약용 감지 루프가 이 그래프 하나를 프롬프트/타겟이벤트/
 쿨다운/넛지문구만 다르게 넣어서 재사용한다(`main.py`의 `fall_vision_loop`,
-`medication_vision_loop`). 감지 모델은 `meta-llama/llama-4-scout`를 OpenRouter
+`medication_vision_loop`). 이 프롬프트·쿨다운·넛지문구 자체는 `agent/scenarios/*.yaml`에서
+온다. 감지 모델은 `meta-llama/llama-4-scout`를 OpenRouter
 경유로 호출하며 Groq를 우선 라우팅하되(속도), 혼잡 시 자동 대체를 허용한다.
 
 **2. 프로액티브 발화 — `gemini_live.py`**
@@ -52,7 +53,7 @@ tool을 스스로 호출한다. 페르소나·감지 프롬프트(`agent/persona
 ## 실행
 
 ```bash
-pip install -r requirements.txt   # fastapi uvicorn python-dotenv google-genai openai langgraph websockets
+pip install -r requirements.txt   # fastapi uvicorn python-dotenv google-genai openai langgraph websockets pyyaml
 cp .env.example .env              # GEMINI_API_KEY, OPEN_ROUTER_KEY 채우기 (PHONE_STREAM_URL은 선택)
 python main.py                    # http://localhost:8003
 ```
