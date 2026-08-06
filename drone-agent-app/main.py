@@ -25,7 +25,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import admin_store
 import memory
+from admin_api import router as admin_router
 from agent.persona import build_unified_persona
 from agent.scenarios import load_scenarios
 from agent.tools import NOTIFY_CAREGIVER_TOOL, notify_caregiver
@@ -70,6 +72,10 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/agent-static", StaticFiles(directory="agent/static"), name="agent-static")
+
+# 관리 콘솔(보호자용) API — 설정 버전 관리 저장소는 data/console.db (admin_store.py)
+admin_store.init_db()
+app.include_router(admin_router)
 
 
 @app.get("/")

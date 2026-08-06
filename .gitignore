@@ -24,3 +24,11 @@ drone-agent-app/memory.json
 
 # OS
 .DS_Store
+
+# 관리 콘솔 저장소 (서버별 상태 — 커밋하지 않음)
+drone-agent-app/data/
+drone-agent-app/config/
+
+# 프런트엔드 빌드 산출물
+node_modules/
+dist/
