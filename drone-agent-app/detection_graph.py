@@ -15,6 +15,7 @@ LangGraph로 일반화한 것.
 
 import base64
 import json
+import logging
 import os
 import re
 import time
@@ -27,6 +28,8 @@ from typing_extensions import TypedDict
 # main.py의 load_dotenv() import 순서에 기대지 않도록, 이 모듈 자체가 .env를 로드한다
 # (모듈 최상단에서 바로 클라이언트를 만들기 때문에 순서에 취약함).
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 DETECT_MODEL = "meta-llama/llama-4-scout"
 
@@ -42,6 +45,7 @@ class DetectionState(TypedDict, total=False):
     prompt: str            # 감지 기준을 담은 시스템 프롬프트
     target_event: str      # 이 값과 event가 일치해야 트리거됨
     cooldown: float        # 초 단위, 마지막 트리거 이후 이만큼 지나야 재트리거
+    min_confidence: float  # 이 값 미만이면 판정이 맞아도 트리거하지 않는다
     last_trigger_at: float  # 호출자가 들고 있는 마지막 트리거 시각
     nudge_template: str    # 트리거 시 nudge_input_queue에 넣을 문구
 
@@ -108,7 +112,11 @@ async def detect_node(state: DetectionState) -> dict:
 
 
 def decide_node(state: DetectionState) -> dict:
-    """타겟 이벤트와 일치하고 쿨다운이 지났는지 판단한다."""
+    """타겟 이벤트와 일치하고, 충분히 확신하며, 쿨다운이 지났는지 판단한다.
+
+    confidence를 보지 않으면 모델이 "아마도"라고 붙인 판정까지 그대로 알림이
+    나간다 — 어르신을 놀라게 하고 시스템을 못 믿게 만드는 가장 흔한 실패다.
+    """
     if state.get("error"):
         return {"should_trigger": False}
 
@@ -116,7 +124,17 @@ def decide_node(state: DetectionState) -> dict:
     cooldown_passed = now - state.get("last_trigger_at", 0.0) > state["cooldown"]
     matched = state.get("event") == state["target_event"]
 
-    if matched and cooldown_passed:
+    min_conf = state.get("min_confidence", 0.0)
+    try:
+        confident = float(state.get("confidence") or 0.0) >= min_conf
+    except (TypeError, ValueError):
+        confident = False  # 숫자가 아니면 신뢰할 수 없는 판정으로 본다
+
+    if matched and not confident:
+        logger.info(f"[detect] {state['target_event']} 판정이 확신 부족으로 무시됨 "
+                    f"(confidence={state.get('confidence')} < {min_conf})")
+
+    if matched and confident and cooldown_passed:
         return {"should_trigger": True, "new_last_trigger_at": now}
     return {"should_trigger": False, "new_last_trigger_at": state.get("last_trigger_at", 0.0)}
 

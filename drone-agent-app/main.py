@@ -383,6 +383,7 @@ async def ws_unified(websocket: WebSocket):
                 "prompt": scenario["detect_prompt"],
                 "target_event": scenario["target_event"],
                 "cooldown": scenario["cooldown"],
+                "min_confidence": scenario.get("min_confidence", 0.7),
                 "last_trigger_at": last_trigger_at,
                 "nudge_template": scenario["nudge_template"],
             })
@@ -418,6 +419,7 @@ async def ws_unified(websocket: WebSocket):
                 "prompt": scenario["detect_prompt"],
                 "target_event": scenario["target_event"],
                 "cooldown": scenario["cooldown"],
+                "min_confidence": scenario.get("min_confidence", 0.7),
                 "last_trigger_at": last_trigger_at,
                 "nudge_template": scenario["nudge_template"],
             })
