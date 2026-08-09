@@ -18,7 +18,12 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-SCENARIOS_DIR = Path(__file__).parent / "scenarios"
+SCENARIOS_ROOT = Path(__file__).parent / "scenarios"
+
+
+def scenarios_dir(agent_id: int = 1) -> Path:
+    """에이전트별 시나리오 디렉토리. 보호자마다 계정이 있으므로 섞이면 안 된다."""
+    return SCENARIOS_ROOT / str(agent_id)
 
 # 기존에 main.py(FALL_DETECT_PROMPT 등)와 persona.py(UNIFIED_PERSONA 문구)에
 # 하드코딩돼 있던 내용을 그대로 옮긴 기본값. agent/scenarios/<key>.yaml이
@@ -75,8 +80,7 @@ DEFAULT_SCENARIOS = {
 }
 
 
-def _load_override(key: str) -> dict | None:
-    path = SCENARIOS_DIR / f"{key}.yaml"
+def _load_override(path: Path) -> dict | None:
     if not path.exists():
         return None
     try:
@@ -90,7 +94,7 @@ def _load_override(key: str) -> dict | None:
         return None
 
 
-def load_scenarios() -> dict:
+def load_scenarios(agent_id: int = 1) -> dict:
     """key -> 시나리오 dict.
 
     디렉토리를 훑어서 읽는다 — 기본값 키만 순회하면 관리 화면에서 새로 만든
@@ -101,7 +105,8 @@ def load_scenarios() -> dict:
     """
     scenarios = {key: dict(default) for key, default in DEFAULT_SCENARIOS.items()}
 
-    found = sorted(SCENARIOS_DIR.glob("*.yaml")) if SCENARIOS_DIR.exists() else []
+    directory = scenarios_dir(agent_id)
+    found = sorted(directory.glob("*.yaml")) if directory.exists() else []
     if not found:
         return scenarios
 
@@ -109,7 +114,7 @@ def load_scenarios() -> dict:
     loaded: dict = {}
     for path in found:
         key = path.stem
-        override = _load_override(key)
+        override = _load_override(path)
         if override is None:
             # 형식이 깨진 파일 — 기본값이 있으면 그것으로, 없으면 건너뛴다
             if key in DEFAULT_SCENARIOS:

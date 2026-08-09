@@ -10,64 +10,93 @@ HMAC 토큰을 발급하고 Authorization 헤더로 검증한다.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
-import os
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException
 
+import accounts
 import admin_store
+from agent import interviewer
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@donghaeng.kr")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "donghaeng")
-_SECRET = os.getenv("ADMIN_SECRET", "donghaeng-console-secret")
+def require_auth(authorization: str = Header(default="")) -> dict:
+    """토큰에서 사용자를 찾아 돌려준다.
 
-
-def _token_for(email: str) -> str:
-    return hmac.new(_SECRET.encode(), email.encode(), hashlib.sha256).hexdigest()
-
-
-def require_auth(authorization: str = Header(default="")) -> str:
+    보호자마다 계정이 있고 계정마다 에이전트가 다르므로, 인증은 "맞다/아니다"가
+    아니라 **누구인지**를 알아내는 일이다. 이후 모든 조회·수정이 이 사람의
+    agent_id로 범위가 좁혀진다.
+    """
     token = authorization.removeprefix("Bearer ").strip()
-    if not token or not hmac.compare_digest(token, _token_for(ADMIN_EMAIL)):
+    user_id = accounts.user_id_from_token(token)
+    user = accounts.get_user(user_id) if user_id else None
+    if not user:
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-    return ADMIN_EMAIL
+    return user
+
+
+@router.post("/signup")
+async def signup(
+    email: str = Body(...), password: str = Body(...), name: str = Body(...),
+):
+    try:
+        user = accounts.signup(email, password, name)
+    except accounts.AccountError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "token": accounts.make_token(user["id"]),
+            "email": user["email"], "name": user["name"]}
 
 
 @router.post("/login")
 async def login(email: str = Body(...), password: str = Body(...)):
-    ok = hmac.compare_digest(email.strip().lower(), ADMIN_EMAIL.lower()) and \
-        hmac.compare_digest(password, ADMIN_PASSWORD)
-    if not ok:
-        raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다.")
-    return {"ok": True, "token": _token_for(ADMIN_EMAIL), "email": ADMIN_EMAIL}
+    try:
+        user = accounts.authenticate(email, password)
+    except accounts.AccountError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    return {"ok": True, "token": accounts.make_token(user["id"]),
+            "email": user["email"], "name": user["name"]}
+
+
+@router.get("/me")
+async def me(user: dict = Depends(require_auth)):
+    """토큰이 아직 유효한지 확인한다.
+
+    콘솔이 화면을 그리기 전에 부른다 — 브라우저에 남아 있는 값만 믿으면
+    로그인한 적 없는 사람도 주소만 치면 관리 화면이 열린다.
+    """
+    return {"ok": True, "email": user["email"], "name": user["name"]}
 
 
 @router.get("/config")
-async def get_config(_: str = Depends(require_auth)):
+async def get_config(user: dict = Depends(require_auth)):
     """콘솔이 첫 화면에서 한 번에 받아가는 전체 상태."""
-    draft = admin_store.get_draft()
-    live = admin_store.get_live()
+    agent_id = user["agent_id"]
+    draft = admin_store.get_draft(agent_id)
+    live = admin_store.get_live(agent_id)
     changes = admin_store.diff(draft, live["config"])
     return {
         "draft": draft,
         "live": {"version": live["version"], "published_at": live["published_at"]},
         "changes": changes,
-        "versions": admin_store.list_versions(),
+        "versions": admin_store.list_versions(agent_id),
         "builtin_actions": admin_store.BUILTIN_ACTIONS,
     }
 
 
 @router.put("/draft")
-async def put_draft(config: dict = Body(...), user: str = Depends(require_auth)):
-    """편집 내용 저장. 저장 단계에서는 막지 않고 경고만 — 배포 때 최종 검증한다."""
-    admin_store.save_draft(config, by=user)
-    live = admin_store.get_live()
+async def put_draft(config: dict = Body(..., embed=True), user: dict = Depends(require_auth)):
+    """편집 내용 저장. 내용 오류는 막지 않고 경고만 — 배포 때 최종 검증한다.
+
+    다만 **형태가 아예 다른 것**은 거부한다. 편집 중인 설정을 통째로 덮어쓰는
+    경로라, 잘못된 모양을 그대로 저장하면 작업하던 내용이 사라지고 배포도 못 하는
+    상태가 된다(요청 형식이 어긋나면 조용히 그렇게 됐다).
+    """
+    if not any(k in config for k in ("scenarios", "actions", "contacts")):
+        raise HTTPException(status_code=400, detail="설정 형식이 올바르지 않습니다.")
+    admin_store.save_draft(config, by=user["email"], agent_id=user["agent_id"])
+    live = admin_store.get_live(user["agent_id"])
     return {
         "ok": True,
         "changes": admin_store.diff(config, live["config"]),
@@ -76,8 +105,8 @@ async def put_draft(config: dict = Body(...), user: str = Depends(require_auth))
 
 
 @router.post("/publish")
-async def publish(user: str = Depends(require_auth)):
-    result = admin_store.publish(by=user)
+async def publish(user: dict = Depends(require_auth)):
+    result = admin_store.publish(by=user["email"], agent_id=user["agent_id"])
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail={"errors": result["errors"]})
     _apply_live_to_runtime()
@@ -85,8 +114,8 @@ async def publish(user: str = Depends(require_auth)):
 
 
 @router.post("/rollback/{version}")
-async def rollback(version: int, user: str = Depends(require_auth)):
-    result = admin_store.rollback(version, by=user)
+async def rollback(version: int, user: dict = Depends(require_auth)):
+    result = admin_store.rollback(version, by=user["email"], agent_id=user["agent_id"])
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail={"errors": result["errors"]})
     _apply_live_to_runtime()
@@ -94,8 +123,65 @@ async def rollback(version: int, user: str = Depends(require_auth)):
 
 
 @router.get("/events")
-async def events(limit: int = 100, _: str = Depends(require_auth)):
-    return {"events": admin_store.list_events(limit)}
+async def events(limit: int = 100, user: dict = Depends(require_auth)):
+    return {"events": admin_store.list_events(limit, user["agent_id"])}
+
+
+# ──────────────────────────────────────────────────────────────
+# 어르신 프로필 / 온보딩 인터뷰
+# ──────────────────────────────────────────────────────────────
+@router.get("/profile")
+async def get_profile(user: dict = Depends(require_auth)):
+    """콘솔이 로그인 직후 부른다 — 비어 있으면 온보딩으로 보낸다."""
+    profile = admin_store.get_profile(user["agent_id"])
+    return {"profile": profile, "onboarded": bool(profile.get("name"))}
+
+
+@router.put("/profile")
+async def put_profile(profile: dict = Body(..., embed=True), user: dict = Depends(require_auth)):
+    """프로필은 배포를 거치지 않는다 — 사실을 고치는 데 승인이 필요할 이유가 없다.
+    저장 즉시 다음 세션(/ws/unified 재연결)부터 반영된다."""
+    admin_store.save_profile(profile, by=user["email"], agent_id=user["agent_id"])
+    return {"ok": True, "profile": profile}
+
+
+@router.get("/onboarding/start")
+async def onboarding_start(user: dict = Depends(require_auth)):
+    return interviewer.opening()
+
+
+@router.post("/onboarding/answer")
+async def onboarding_answer(
+    answers: dict = Body(default={}),
+    slot: str = Body(default=""),
+    text: str = Body(default=""),
+    followup_key: str = Body(default=""),
+    user: dict = Depends(require_auth),
+):
+    """답변 하나를 받아 다음 질문을 돌려준다.
+
+    대화 상태(answers)를 서버에 두지 않고 매번 주고받는다 — 인터뷰는 한 번
+    쓰고 버리는 흐름이라 세션 저장소를 만들 이유가 없고, 새로고침해도
+    프런트가 들고 있는 상태로 이어갈 수 있다.
+    """
+    return await interviewer.advance(answers, slot, text, followup_key)
+
+
+@router.post("/onboarding/finish")
+async def onboarding_finish(
+    # embed=True가 없으면 FastAPI가 본문 전체를 answers로 본다 — Body 파라미터가
+    # 하나뿐일 때의 기본 동작이라, {"answers": {...}}가 통째로 들어가 값이 다 사라진다.
+    answers: dict = Body(default={}, embed=True),
+    user: dict = Depends(require_auth),
+):
+    """인터뷰 답변을 프로필로 바꿔 저장한다.
+
+    인터뷰 원문은 저장하지 않는다 — 필요한 건 추출된 사실이고, 건강 관련
+    대화를 그대로 쌓아둘 이유가 없다 (요약기와 같은 방침).
+    """
+    profile = interviewer.to_profile(answers)
+    admin_store.save_profile(profile, by=user["email"], agent_id=user["agent_id"])
+    return {"ok": True, "profile": profile}
 
 
 def _apply_live_to_runtime():

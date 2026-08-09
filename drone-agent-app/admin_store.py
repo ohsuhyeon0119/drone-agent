@@ -45,10 +45,22 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 DB_PATH = os.getenv("ADMIN_DB_PATH", os.path.join(DATA_DIR, "console.db"))
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
-LIVE_JSON_PATH = os.path.join(CONFIG_DIR, "live.json")
-SCENARIOS_DIR = os.path.join(BASE_DIR, "agent", "scenarios")
+SCENARIOS_ROOT = os.path.join(BASE_DIR, "agent", "scenarios")
 
 DEFAULT_AGENT_ID = 1
+
+
+def scenarios_dir(agent_id: int = DEFAULT_AGENT_ID) -> str:
+    """에이전트별 시나리오 디렉토리.
+
+    보호자마다 계정이 생기면서 한 디렉토리를 공유할 수 없게 됐다 — 두 계정이
+    배포하면 서로의 yaml을 덮어쓴다. agent_id로 나눠 담는다.
+    """
+    return os.path.join(SCENARIOS_ROOT, str(agent_id))
+
+
+def live_json_path(agent_id: int = DEFAULT_AGENT_ID) -> str:
+    return os.path.join(CONFIG_DIR, f"live-{agent_id}.json")
 
 # 에이전트가 실제로 실행할 수 있는 내장 행동. 콘솔에서 임의로 만들 수 있는 것은
 # 웹훅(kind="webhook")뿐이고, 내장 행동은 코드에 구현체가 있어야 하므로 목록이 고정이다.
@@ -104,6 +116,18 @@ CREATE TABLE IF NOT EXISTS config_drafts (
   config_json TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   updated_by  TEXT
+);
+
+-- 어르신 프로필 (agent당 1행)
+--
+-- config_versions에 넣지 않는다. 프로필은 "설정"이 아니라 "사실"이라서,
+-- 귀가 어두우시다는 걸 뒤늦게 알고 고칠 때 배포 승인을 거치게 하면 안 된다.
+-- 저장 즉시 다음 세션부터 반영되고, 변경 이력은 events에 남긴다.
+CREATE TABLE IF NOT EXISTS profiles (
+  agent_id     INTEGER PRIMARY KEY REFERENCES agents(id),
+  profile_json TEXT NOT NULL,
+  updated_at   TEXT NOT NULL,
+  updated_by   TEXT
 );
 
 -- 활동 로그 (append only)
@@ -171,12 +195,23 @@ def _write_atomic(path: str, text: str):
 # ──────────────────────────────────────────────────────────────
 # 초기화 / 이관
 # ──────────────────────────────────────────────────────────────
+def _bundle_from_defaults() -> dict:
+    """새로 가입한 계정이 시작할 기본 설정. 파일이 아니라 코드 기본값에서 만든다."""
+    from agent.scenarios import DEFAULT_SCENARIOS
+
+    return _bundle_from(DEFAULT_SCENARIOS)
+
+
 def _bundle_from_yaml() -> dict:
-    """기존 agent/scenarios/*.yaml을 읽어 초기 설정 번들(v1)을 만든다."""
+    """기존 agent/scenarios/1/*.yaml을 읽어 초기 설정 번들(v1)을 만든다."""
     from agent.scenarios import load_scenarios
 
+    return _bundle_from(load_scenarios(DEFAULT_AGENT_ID))
+
+
+def _bundle_from(source: dict) -> dict:
     scenarios = []
-    for key, s in load_scenarios().items():
+    for key, s in source.items():
         scenarios.append({
             "key": key,
             "name": s.get("name", key),
@@ -195,8 +230,59 @@ def _bundle_from_yaml() -> dict:
     }
 
 
+def _migrate_flat_scenarios():
+    """예전 구조(agent/scenarios/*.yaml)를 agent/scenarios/1/로 옮긴다.
+
+    계정마다 에이전트가 생기면서 시나리오 파일을 agent_id 하위로 나눴다.
+    이미 돌고 있던 설치본의 파일이 사라지면 기본값으로 되돌아가 버리므로,
+    한 번만 옮겨준다.
+    """
+    if not os.path.isdir(SCENARIOS_ROOT):
+        return
+    stray = [n for n in os.listdir(SCENARIOS_ROOT) if n.endswith(".yaml")]
+    if not stray:
+        return
+    target = scenarios_dir(DEFAULT_AGENT_ID)
+    os.makedirs(target, exist_ok=True)
+    for name in stray:
+        os.replace(os.path.join(SCENARIOS_ROOT, name), os.path.join(target, name))
+    logger.info(f"[admin_store] 시나리오 파일 {len(stray)}개를 agent/scenarios/1/로 이관")
+
+
+def seed_agent(conn: sqlite3.Connection, agent_id: int, source: dict | None = None):
+    """새 에이전트에 초기 설정(v1)과 draft를 만들어준다.
+
+    가입 직후 설정이 하나도 없으면 콘솔이 빈 화면이 되고, 배포할 것도 없어서
+    무엇부터 해야 할지 알 수 없다. 기본 시나리오를 깔아둔 상태로 시작한다.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) c FROM config_versions WHERE agent_id=?", (agent_id,)
+    ).fetchone()
+    if row["c"]:
+        return
+    bundle = source if source is not None else _bundle_from_defaults()
+    payload = json.dumps(bundle, ensure_ascii=False)
+    conn.execute(
+        """INSERT INTO config_versions
+           (agent_id, version, config_json, changes_json, published_at, published_by)
+           VALUES (?, 1, ?, ?, ?, ?)""",
+        (agent_id, payload,
+         # 변경 목록은 항상 {text, tier} 형태 — 콘솔이 한 가지 형식만 다루게 한다
+         json.dumps([{"text": "초기 설정", "tier": "instant"}], ensure_ascii=False),
+         _now(), "system"),
+    )
+    conn.execute(
+        """INSERT INTO config_drafts (agent_id, config_json, updated_at, updated_by)
+           VALUES (?, ?, ?, ?)""",
+        (agent_id, payload, _now(), "system"),
+    )
+    _export_live(conn, agent_id)
+    logger.info(f"[admin_store] agent {agent_id} 초기 설정 생성")
+
+
 def init_db():
     """테이블 생성 + 최초 실행 시 yaml에서 v1 스냅샷 이관."""
+    _migrate_flat_scenarios()
     with closing(_connect()) as conn, conn:
         conn.executescript(SCHEMA)
         row = conn.execute("SELECT COUNT(*) c FROM agents").fetchone()
@@ -205,29 +291,52 @@ def init_db():
                 "INSERT INTO agents (id, name, created_at) VALUES (?, ?, ?)",
                 (DEFAULT_AGENT_ID, "기본 에이전트", _now()),
             )
+        seed_agent(conn, DEFAULT_AGENT_ID, source=_bundle_from_yaml())
+
+        # 기존 에이전트들의 내보내기 파일을 최신 상태로 맞춘다
+        for r in conn.execute("SELECT DISTINCT agent_id FROM config_versions").fetchall():
+            _export_live(conn, r["agent_id"])
+
+
+# ──────────────────────────────────────────────────────────────
+# 어르신 프로필
+# ──────────────────────────────────────────────────────────────
+def get_profile(agent_id: int = DEFAULT_AGENT_ID) -> dict:
+    """저장된 프로필. 아직 없으면 빈 dict.
+
+    빈 dict를 돌려주는 게 중요하다 — 온보딩을 건너뛴 사용자도 페르소나가
+    지금과 똑같이 조립돼야 하고, 호출부가 없음을 따로 처리하지 않아도 되게.
+    """
+    with closing(_connect()) as conn:
         row = conn.execute(
-            "SELECT COUNT(*) c FROM config_versions WHERE agent_id=?", (DEFAULT_AGENT_ID,)
+            "SELECT profile_json FROM profiles WHERE agent_id=?", (agent_id,)
         ).fetchone()
-        if row["c"] == 0:
-            bundle = _bundle_from_yaml()
-            payload = json.dumps(bundle, ensure_ascii=False)
-            conn.execute(
-                """INSERT INTO config_versions
-                   (agent_id, version, config_json, changes_json, published_at, published_by)
-                   VALUES (?, 1, ?, ?, ?, ?)""",
-                (DEFAULT_AGENT_ID, payload,
-                 # 변경 목록은 항상 {text, tier} 형태 — 콘솔이 한 가지 형식만 다루게 한다
-                 json.dumps([{"text": "초기 설정 (agent/scenarios/*.yaml에서 이관)",
-                              "tier": "instant"}], ensure_ascii=False),
-                 _now(), "system"),
-            )
-            conn.execute(
-                """INSERT INTO config_drafts (agent_id, config_json, updated_at, updated_by)
-                   VALUES (?, ?, ?, ?)""",
-                (DEFAULT_AGENT_ID, payload, _now(), "system"),
-            )
-            logger.info("[admin_store] yaml에서 v1 스냅샷 이관 완료")
-        _export_live(conn)
+    if not row:
+        return {}
+    try:
+        data = json.loads(row["profile_json"])
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        logger.warning("[admin_store] 프로필 JSON이 깨져 빈 값으로 대체")
+        return {}
+
+
+def save_profile(profile: dict, by: str | None = None,
+                 agent_id: int = DEFAULT_AGENT_ID) -> dict:
+    """프로필을 통째로 저장한다 (부분 수정은 호출부에서 병합한 뒤 넘긴다)."""
+    payload = json.dumps(profile, ensure_ascii=False)
+    with closing(_connect()) as conn, conn:
+        conn.execute(
+            """INSERT INTO profiles (agent_id, profile_json, updated_at, updated_by)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(agent_id) DO UPDATE SET
+                 profile_json=excluded.profile_json,
+                 updated_at=excluded.updated_at,
+                 updated_by=excluded.updated_by""",
+            (agent_id, payload, _now(), by),
+        )
+    log_event("profile.updated", {"name": profile.get("name", "")}, agent_id)
+    return profile
 
 
 # ──────────────────────────────────────────────────────────────
@@ -470,18 +579,20 @@ def _export_live(conn: sqlite3.Connection, agent_id: int = DEFAULT_AGENT_ID):
     if not row:
         return
     bundle = json.loads(row["config_json"])
-    _write_atomic(LIVE_JSON_PATH, json.dumps(
+    _write_atomic(live_json_path(agent_id), json.dumps(
         {"version": row["version"], "published_at": row["published_at"], "config": bundle},
         ensure_ascii=False, indent=1,
     ))
 
+    target_dir = scenarios_dir(agent_id)
+    os.makedirs(target_dir, exist_ok=True)
+
     # 설정에 없는 yaml은 지운다 — 콘솔에서 삭제한 시나리오가 파일로 남아 되살아나지 않게.
     keep = {f"{s['key']}.yaml" for s in bundle.get("scenarios", []) if s.get("key")}
-    if os.path.isdir(SCENARIOS_DIR):
-        for name in os.listdir(SCENARIOS_DIR):
-            if name.endswith(".yaml") and name not in keep:
-                os.remove(os.path.join(SCENARIOS_DIR, name))
-                logger.info(f"[admin_store] 삭제된 시나리오 파일 정리: {name}")
+    for name in os.listdir(target_dir):
+        if name.endswith(".yaml") and name not in keep:
+            os.remove(os.path.join(target_dir, name))
+            logger.info(f"[admin_store] 삭제된 시나리오 파일 정리: {agent_id}/{name}")
 
     for s in bundle.get("scenarios", []):
         doc = {
@@ -508,7 +619,7 @@ def _export_live(conn: sqlite3.Connection, agent_id: int = DEFAULT_AGENT_ID):
             "# 손으로 고쳐도 동작하지만, 다음 배포 때 덮어써집니다.\n"
         )
         _write_atomic(
-            os.path.join(SCENARIOS_DIR, f"{s['key']}.yaml"),
+            os.path.join(target_dir, f"{s['key']}.yaml"),
             header + yaml.dump(doc, Dumper=_BlockDumper, allow_unicode=True,
                                sort_keys=False, width=100, default_flow_style=False),
         )

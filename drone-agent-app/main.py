@@ -25,7 +25,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import accounts
 import admin_store
+import live_monitor
 import memory
 from admin_api import router as admin_router
 from agent.persona import build_nudge, build_unified_persona
@@ -99,6 +101,7 @@ async def _no_cache_static(request, call_next):
 
 # 관리 콘솔(보호자용) API — 설정 버전 관리 저장소는 data/console.db (admin_store.py)
 admin_store.init_db()
+accounts.init_db()
 app.include_router(admin_router)
 
 
@@ -311,16 +314,28 @@ async def ws_unified(websocket: WebSocket):
     걸리느냐로 자연스럽게 결정된다.
     """
     await websocket.accept()
-    logger.info("[/unified] WebSocket connection accepted")
 
-    # agent/scenarios/*.yaml을 연결마다 새로 읽는다 — 서버 프로세스를 재시작하지
-    # 않아도 지침을 고친 뒤 세션을 새로 시작하면(재연결하면) 바로 반영되게 하기 위함.
-    scenarios = load_scenarios()
+    # 보호자마다 계정과 에이전트가 따로 있으므로, 이 기기가 누구의 어르신
+    # 곁에 있는지 알아야 한다. 기기 주소에 ?agent=N으로 붙인다.
+    # 값이 없으면 1번 — 계정이 하나뿐이던 시절의 기기 주소를 그대로 살린다.
+    try:
+        agent_id = int(websocket.query_params.get("agent") or admin_store.DEFAULT_AGENT_ID)
+    except ValueError:
+        agent_id = admin_store.DEFAULT_AGENT_ID
+    logger.info(f"[/unified] WebSocket connection accepted (agent={agent_id})")
+
+    # 콘솔이 이 세션을 들여다볼 수 있게 이벤트를 복사해 흘린다. 감싸기만 하므로
+    # 아래 코드는 평소처럼 websocket.send_json을 쓰면 된다.
+    websocket = live_monitor.MirroredSocket(websocket, agent_id)
+
+    # agent/scenarios/<agent_id>/*.yaml을 연결마다 새로 읽는다 — 서버 프로세스를
+    # 재시작하지 않아도 지침을 고친 뒤 재연결하면 바로 반영되게 하기 위함.
+    scenarios = load_scenarios(agent_id)
 
     # 행동(tool)과 연락처도 연결마다 새로 읽는다 — 콘솔에서 배포한 내용이
     # 다음 대화부터 반영되게 하기 위함. Gemini Live는 tool을 연결 시점에만
     # 고정할 수 있어서, 이미 열린 세션에는 반영할 수 없다.
-    live_config = admin_store.get_live()["config"]
+    live_config = admin_store.get_live(agent_id)["config"]
     all_actions = live_config.get("actions", [])
     contacts = live_config.get("contacts", [])
 
@@ -335,7 +350,10 @@ async def ws_unified(websocket: WebSocket):
     }
     actions = [a for a in all_actions if a.get("id") in used_action_ids]
 
-    unified_persona = build_unified_persona(scenarios, actions)
+    # 프로필도 매 연결마다 새로 읽는다 — 보호자가 콘솔에서 고친 사실이
+    # 서버 재시작 없이 다음 대화부터 반영되게 하려는 것 (시나리오와 같은 이유).
+    profile = admin_store.get_profile(agent_id)
+    unified_persona = build_unified_persona(scenarios, actions, profile)
 
     audio_input_queue = asyncio.Queue()
     video_input_queue = asyncio.Queue()
@@ -386,6 +404,8 @@ async def ws_unified(websocket: WebSocket):
     # 바로 말을 걸어버리는 문제를 피하기 위함.
     _active_unified_session["queue"] = nudge_input_queue
     _active_unified_session["websocket"] = websocket
+    # 관전 채널은 프레임 버퍼를 참조만 한다 (복사하면 지연이 생긴다)
+    live_monitor.monitor.session_started(agent_id, frame_buffer)
 
     async def vision_loop(scenario: dict):
         """시나리오 하나를 감시한다.
@@ -481,6 +501,7 @@ async def ws_unified(websocket: WebSocket):
         if _active_unified_session["queue"] is nudge_input_queue:
             _active_unified_session["queue"] = None
             _active_unified_session["websocket"] = None
+        live_monitor.monitor.session_ended(agent_id)
         # 대화를 통째로 남기지 않고 요약해서 저장한다 — 특히 "요청했는데 이뤄지지
         # 않은 것". 세션 종료를 막지 않도록 별도 태스크로 돌린다.
         if transcript:
@@ -489,6 +510,62 @@ async def ws_unified(websocket: WebSocket):
             await websocket.close()
         except Exception:
             pass
+
+
+@app.websocket("/ws/monitor")
+async def ws_monitor(websocket: WebSocket):
+    """관리 콘솔이 실행 중인 세션을 들여다보는 읽기 전용 채널.
+
+    카메라가 보고 있는 화면과 그 사이 일어난 일(감지, 신호, 도구 실행, 대화)을
+    그대로 흘려보낸다. 여기서 들어오는 것은 세션에 아무 영향을 주지 않는다 —
+    보호자가 콘솔을 열어둔 것 때문에 어르신과의 대화가 달라지면 안 된다.
+
+    브라우저 WebSocket은 헤더를 붙일 수 없어서 토큰을 쿼리로 받는다. 남의
+    에이전트를 훔쳐보지 못하도록, 토큰의 주인이 가진 agent_id만 볼 수 있다.
+    """
+    token = websocket.query_params.get("token", "")
+    user_id = accounts.user_id_from_token(token)
+    user = accounts.get_user(user_id) if user_id else None
+    if not user:
+        await websocket.close(code=4401)
+        return
+
+    agent_id = user["agent_id"]
+    await websocket.accept()
+    queue = live_monitor.monitor.subscribe(agent_id)
+    logger.info(f"[/monitor] 관전 시작 (agent={agent_id}, {user['email']})")
+
+    try:
+        # 콘솔을 나중에 열어도 직전 상황부터 보이도록 지난 기록을 먼저 준다
+        await websocket.send_json({
+            "type": "init",
+            "status": live_monitor.monitor.status(agent_id),
+            "events": live_monitor.monitor.recent(agent_id),
+        })
+
+        last_frame_at = 0.0
+        while True:
+            # 이벤트를 기다리되, 영상이 멈춰 보이지 않게 주기적으로 깨어난다
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=0.4)
+                await websocket.send_json({"type": "event", "event": event})
+            except asyncio.TimeoutError:
+                pass
+
+            # 프레임은 초당 2장이면 "지금 무엇을 보고 있는지" 확인에 충분하다.
+            # 매 프레임 보내면 관전자 한 명이 세션 대역폭을 그만큼 더 먹는다.
+            now = time.monotonic()
+            if now - last_frame_at >= 0.5:
+                frame = live_monitor.monitor.frame(agent_id)
+                if frame:
+                    last_frame_at = now
+                    await websocket.send_bytes(frame)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.info(f"[/monitor] 관전 종료: {type(e).__name__}: {e}")
+    finally:
+        live_monitor.monitor.unsubscribe(agent_id, queue)
 
 
 async def _save_conversation_summary(transcript: list[dict]):

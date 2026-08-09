@@ -117,6 +117,105 @@ def build_nudge(scenario: dict, reason: str | None = None) -> str:
     return f"{base} (카메라가 본 것: {reason})" if reason else base
 
 
+def _particle(word: str, with_final: str, without_final: str) -> str:
+    """받침 유무에 따라 조사를 고른다 ("어르신이라고" / "순자라고").
+
+    이름과 호칭이 데이터로 들어오므로 조사를 고정해두면 반드시 어색해진다.
+    """
+    if not word:
+        return without_final
+    last = word[-1]
+    if "가" <= last <= "힣":
+        return with_final if (ord(last) - 0xAC00) % 28 else without_final
+    return without_final
+
+
+def build_profile_block(profile: dict | None) -> str:
+    """어르신 프로필을 페르소나 문장으로 렌더한다.
+
+    PERSONA_BASE의 '어떤 어르신을 만나든' 8가지를 다시 쓰지 않고 **몇 번이
+    이 분께 해당하는지 가리키기만 한다.** 같은 내용을 두 군데 두면 한쪽만
+    고쳐졌을 때 서로 모순되는 지침이 되기 때문이다.
+
+    값이 비면 그 줄을 통째로 빼고, 프로필 자체가 비면 빈 문자열을 돌려준다 —
+    온보딩을 건너뛴 사용자도 지금까지와 완전히 동일하게 동작해야 한다.
+    """
+    if not profile or not profile.get("name"):
+        return ""
+
+    name = profile["name"]
+    address = profile.get("address_as") or "어르신"
+    year = profile.get("birth_year")
+
+    head = f"{name} 어르신"
+    if year:
+        # 나이를 미리 계산해 넣는다 — 모델이 연도 계산을 틀리면 어르신께 그대로 말한다
+        from datetime import date
+        head += f", {date.today().year - int(year) + 1}세"
+    lines = [head + f'. "{address}"{_particle(address, "이라고", "라고")} 부르세요.']
+    if profile.get("lives_alone"):
+        lines.append("혼자 지내십니다.")
+
+    traits = []
+    hearing = profile.get("hearing")
+    if hearing == "많이 어두우심":
+        traits.append("귀가 많이 어두우십니다. 위 1번을 특히 지키세요 — 더 크게가 아니라 "
+                      "더 천천히, 더 짧게 말합니다.")
+    elif hearing == "조금 어두우심":
+        traits.append("귀가 조금 어두우십니다. 한 번 더, 더 천천히 말해 주세요.")
+
+    mobility = profile.get("mobility")
+    if mobility in ("보행기·휠체어", "지팡이", "불편하심"):
+        aid = {"보행기·휠체어": "보행기나 휠체어를 쓰십니다",
+               "지팡이": "지팡이를 쓰십니다"}.get(mobility, "거동이 불편하십니다")
+        traits.append(f"{aid}. 위 5번에 따라 움직이시라는 안내는 신중히 하고, 무리해 "
+                      "보이면 권하지 말고 보호자에게 알리는 쪽을 택하세요.")
+
+    memory = profile.get("memory")
+    if memory in ("자주 잊으심", "가끔 잊으심"):
+        traits.append(f"기억이 {'자주' if memory == '자주 잊으심' else '가끔'} 흐릿해지십니다. "
+                      "위 2번에 따라 같은 질문을 반복하셔도 처음 듣는 것처럼 대답하세요.")
+
+    talk = profile.get("talkativeness")
+    if talk == "조용하심":
+        traits.append("말수가 적으신 편입니다. 대답이 짧아도 재촉하지 말고, 과하게 말을 걸지 마세요.")
+    elif talk == "많으심":
+        traits.append("말씀하시기를 좋아하십니다. 이야기를 끊지 말고 충분히 들어 드리세요.")
+
+    if profile.get("help_attitude") in ("꺼리시는 편", "사양하시는 편"):
+        traits.append('도움받는 것을 꺼리시는 편입니다. 위 4번에 따라 "제가 해드릴게요"보다 '
+                      '"이렇게 하시면 됩니다"라고 말하세요.')
+
+    if profile.get("fall_history"):
+        traits.append("최근 1년 안에 넘어지신 적이 있습니다. 자세가 이상해 보이면 먼저 확인하세요.")
+
+    places = profile.get("risk_places") or []
+    if places:
+        traits.append(f"{', '.join(places)}에서 특히 조심하셔야 합니다.")
+
+    meds = profile.get("medications") or []
+    if meds:
+        rendered = ", ".join(
+            f"{m.get('name', '')} {m.get('time', '')} {m.get('dosage', '')}".strip()
+            for m in meds if isinstance(m, dict)
+        )
+        if rendered:
+            traits.append(f"복용 중인 약: {rendered}.")
+
+    for note in (profile.get("notes") or [])[:3]:
+        traits.append(str(note))
+
+    block = "\n\n[지금 곁에 계신 분]\n" + "\n".join(lines)
+    if traits:
+        block += "\n" + "\n".join(f"- {t}" for t in traits)
+
+    interests = profile.get("interests") or []
+    if interests:
+        block += (f"\n\n좋아하시는 것: {', '.join(interests)}. "
+                  "대화가 끊기면 이런 이야기로 자연스럽게 이어가세요.")
+    return block
+
+
 def _render_actions_block(actions: list[dict]) -> str:
     """등록된 행동(tool)을 페르소나에 명시한다.
 
@@ -134,8 +233,9 @@ def _render_actions_block(actions: list[dict]) -> str:
     )
 
 
-def build_unified_persona(scenarios: dict, actions: list[dict] | None = None) -> str:
-    """PERSONA_BASE + 시나리오별 지침을 하나의 시스템 프롬프트로 합친다.
+def build_unified_persona(scenarios: dict, actions: list[dict] | None = None,
+                          profile: dict | None = None) -> str:
+    """PERSONA_BASE + 어르신 프로필 + 시나리오별 지침을 하나의 시스템 프롬프트로 합친다.
 
     어떤 [SYSTEM] 신호가 오든 그때그때 알아서 대응하고, 아무 신호가 없을 때는
     자유로운 대화/작업 보조 역할을 한다는 큰 틀은 그대로 두고, 시나리오
@@ -148,6 +248,7 @@ def build_unified_persona(scenarios: dict, actions: list[dict] | None = None) ->
     other_index = len(blocks) + 1
     return (
         PERSONA_BASE
+        + build_profile_block(profile)
         + "\n\n당신은 아래 상황들을 동시에 대비합니다 — 무슨 상황인지는 당신이 미리 아는 게 "
         "아니라, 그때그때 받는 [SYSTEM] 신호로 알게 됩니다:\n\n"
         + "\n\n".join(blocks)
