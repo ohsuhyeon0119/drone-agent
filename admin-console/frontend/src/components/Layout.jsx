@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { useAuth } from "../auth.jsx";
 import { useStore } from "../store.jsx";
 
 const MENU = [
+  { to: "/monitor", label: "모니터링", icon: IconMonitor },
   { to: "/scenarios", label: "시나리오", icon: IconEye },
   { to: "/actions", label: "행동", icon: IconHand },
   { to: "/contacts", label: "알림 연락처", icon: IconPhone },
@@ -10,6 +12,13 @@ const MENU = [
 ];
 
 
+function IconMonitor() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="4" width="20" height="13" rx="2" /><path d="M8 21h8m-4-4v4" />
+    </svg>
+  );
+}
 function IconEye() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -54,6 +63,14 @@ function IconChevron({ open }) {
   );
 }
 
+function IconLogout() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" />
+    </svg>
+  );
+}
+
 function IconMenu() {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
@@ -66,6 +83,7 @@ export default function Layout() {
   const [open, setOpen] = useState(true); // 데스크톱: 접힘/펼침
   const [mobileOpen, setMobileOpen] = useState(false); // 모바일: 오버레이
   const { live, changes } = useStore();
+  const { logout, user } = useAuth();
   const navigate = useNavigate();
 
   return (
@@ -99,8 +117,11 @@ export default function Layout() {
       )}
 
       <aside
+        /* 본문이 길면 사이드바도 페이지 높이만큼 늘어나서, 아래에 붙인 계정·로그아웃이
+           화면 밖으로 밀려 보이지 않는다. 화면 높이에 고정하고 안쪽에서만 스크롤한다. */
         className={`flex flex-col bg-surface border-r border-line transition-[width,transform] duration-200
-          fixed inset-y-0 left-0 z-50 w-[280px] md:static md:z-auto md:flex-none md:translate-x-0
+          fixed inset-y-0 left-0 z-50 w-[280px]
+          md:sticky md:top-0 md:h-screen md:self-start md:z-auto md:flex-none md:translate-x-0
           ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
           ${open ? "md:w-[330px]" : "md:w-[96px]"}`}
       >
@@ -111,6 +132,8 @@ export default function Layout() {
           live={live}
           changes={changes}
           navigate={navigate}
+          logout={logout}
+          user={user}
         />
       </aside>
 
@@ -123,7 +146,7 @@ export default function Layout() {
   );
 }
 
-function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate }) {
+function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, logout, user }) {
   // 모바일 오버레이는 항상 펼친 폭(w-64)이므로 라벨을 항상 보여준다.
   // md 미만에서는 open 상태와 무관하게 라벨 표시 — CSS로 제어.
   const labelCls = open ? "" : "md:hidden";
@@ -150,7 +173,7 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate })
         </button>
       </div>
 
-      <nav className="flex-1 py-4 flex flex-col gap-1 px-3">
+      <nav className="flex-1 min-h-0 overflow-y-auto py-4 flex flex-col gap-1 px-3">
         {MENU.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
@@ -176,6 +199,29 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate })
           <span className={`whitespace-nowrap ${labelCls}`}>
             활동 기록 <span className="text-[18px]">· 준비 중</span>
           </span>
+        </div>
+
+        {/* 계정마다 돌보는 어르신이 다르므로, 어느 계정으로 들어와 있는지 보여야
+            엉뚱한 곳에 설정을 배포하는 일이 없다. */}
+        <div className="mt-auto pt-3 border-t border-line">
+          {user && (
+            <div className={`px-4 pb-2 ${labelCls}`}>
+              <div className="text-[24px] font-bold truncate">{user.name}</div>
+              <div className="text-[19px] text-muted truncate" title={user.email}>
+                {user.email}
+              </div>
+            </div>
+          )}
+          <button
+            onClick={() => { closeMobile(); logout(); navigate("/login", { replace: true }); }}
+            title={user ? `로그아웃 (${user.email})` : "로그아웃"}
+            className={`w-full flex items-center gap-3.5 h-14 text-[26px] rounded-(--radius-ctl) px-4
+              text-muted hover:text-ink transition-colors duration-150 cursor-pointer
+              ${open ? "" : "md:px-0 md:justify-center"}`}
+          >
+            <IconLogout />
+            <span className={labelCls}>로그아웃</span>
+          </button>
         </div>
       </nav>
 
