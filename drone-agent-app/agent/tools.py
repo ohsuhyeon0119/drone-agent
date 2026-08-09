@@ -101,11 +101,20 @@ def build_tool_mapping(actions: list[dict], context: dict) -> dict[str, Callable
 
 
 def _targets_for(action_id: str, context: dict) -> list[dict]:
-    """이 행동에 연결된 연락 대상. 태깅이 없으면 등록된 연락처 전체를 쓴다."""
+    """이 행동의 연락 대상.
+
+    행동 자체에 지정된 대상을 우선한다 ("보호자 알림에는 딸을"처럼 행동 단위로
+    정하는 게 자연스럽기 때문). 없으면 이 행동을 쓰는 시나리오에 지정된 대상,
+    그것도 없으면 등록된 연락처 전체.
+    """
     contacts = {c["id"]: c for c in context.get("contacts", [])}
-    ids = context.get("contact_ids_by_action", {}).get(action_id) or []
-    targets = [contacts[i] for i in ids if i in contacts]
-    return targets or list(contacts.values())
+    for source in (context.get("contact_ids_by_action_own", {}),
+                   context.get("contact_ids_by_action", {})):
+        ids = source.get(action_id) or []
+        targets = [contacts[i] for i in ids if i in contacts]
+        if targets:
+            return targets
+    return list(contacts.values())
 
 
 def _describe(targets: list[dict]) -> str:

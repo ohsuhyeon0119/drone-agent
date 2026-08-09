@@ -335,6 +335,10 @@ async def ws_unified(websocket: WebSocket):
 
     tool_context = {
         "contacts": contacts,
+        # 행동 자체에 지정한 대상이 우선, 없으면 시나리오에 지정한 대상
+        "contact_ids_by_action_own": {
+            a["id"]: a.get("notify_contact_ids") or [] for a in actions if a.get("id")
+        },
         "contact_ids_by_action": contact_ids_by_action,
         "on_event": on_tool_event,
     }

@@ -56,6 +56,7 @@ BUILTIN_ACTIONS = [
         ],
         "kind": "builtin",
         "needs_contacts": True,
+        "notify_contact_ids": [],
     },
     {
         # 카메라로 확인된 복용은 감지 루프가 직접 기록하므로, 이 행동은 사용자가
@@ -238,6 +239,10 @@ def validate(bundle: dict) -> list[str]:
             errors.append(f"{a.get('name', label)}: 실행 조건이 비어 있습니다.")
         if a.get("kind") == "webhook" and not str(a.get("url", "")).strip().startswith("http"):
             errors.append(f"{a.get('name', label)}: 연결 주소가 http로 시작해야 합니다.")
+        for cid in a.get("notify_contact_ids") or []:
+            if cid not in {c.get("id") for c in (bundle.get("contacts") or [])}:
+                errors.append(f"{a.get('name', label)}: 연락 대상 중 삭제된 연락처가 있습니다.")
+                break
         action_ids.add(a.get("id"))
 
     contacts = bundle.get("contacts")
