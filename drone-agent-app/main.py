@@ -30,6 +30,7 @@ import memory
 from admin_api import router as admin_router
 from agent.persona import build_unified_persona
 from agent.scenarios import load_scenarios
+from agent.summarizer import summarize
 from agent.tools import build_tool_mapping, build_tools
 from detection_graph import detection_graph
 from gemini_live import GeminiLive
@@ -72,6 +73,16 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/agent-static", StaticFiles(directory="agent/static"), name="agent-static")
+
+
+@app.middleware("http")
+async def _no_cache_static(request, call_next):
+    """CSS/JS를 고쳐도 브라우저가 예전 것을 계속 쓰는 문제를 막는다.
+    (화면을 다듬는 동안 '왜 안 바뀌지'로 시간을 버리지 않기 위함)"""
+    response = await call_next(request)
+    if request.url.path.startswith(("/static/", "/agent-static/")):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
 
 # 관리 콘솔(보호자용) API — 설정 버전 관리 저장소는 data/console.db (admin_store.py)
 admin_store.init_db()
@@ -152,12 +163,27 @@ async def _run_gemini_session(
     video_input_queue,
     text_input_queue,
     nudge_input_queue,
+    transcript: list | None = None,
 ):
     async def audio_output_callback(data):
         await websocket.send_bytes(data)
 
     async def audio_interrupt_callback():
         pass
+
+    # 전사는 조각으로 흘러온다 — 같은 화자의 조각을 이어 붙여 한 발화로 모은다.
+    # (조각 단위로 저장하면 초당 여러 건이 쌓여 요약에도 방해가 된다)
+    def collect(event: dict):
+        if transcript is None:
+            return
+        role = {"user": "user", "gemini": "agent"}.get(event.get("type"))
+        text = event.get("text")
+        if not role or not text:
+            return
+        if transcript and transcript[-1]["role"] == role:
+            transcript[-1]["text"] += text
+        else:
+            transcript.append({"role": role, "text": text})
 
     async for event in gemini_client.start_session(
         audio_input_queue=audio_input_queue,
@@ -168,6 +194,7 @@ async def _run_gemini_session(
         nudge_input_queue=nudge_input_queue,
     ):
         if event:
+            collect(event)
             await websocket.send_json(event)
 
 
@@ -421,8 +448,22 @@ async def ws_unified(websocket: WebSocket):
     fall_task = asyncio.create_task(fall_vision_loop())
     medication_task = asyncio.create_task(medication_vision_loop())
 
+    transcript: list[dict] = []
+
     try:
-        await _run_gemini_session(websocket, gemini_client, audio_input_queue, video_input_queue, text_input_queue, nudge_input_queue)
+        # 브라우저가 끊겨도 Gemini 세션은 계속 살아 있어서, 그냥 await 하면 세션
+        # 정리(대화 요약 저장 포함)가 실행되지 않는다. 둘 중 먼저 끝나는 쪽을 기다린다.
+        session_task = asyncio.create_task(
+            _run_gemini_session(websocket, gemini_client, audio_input_queue, video_input_queue,
+                                text_input_queue, nudge_input_queue, transcript))
+        done, _ = await asyncio.wait({session_task, receive_task},
+                                     return_when=asyncio.FIRST_COMPLETED)
+        session_task.cancel()
+        for t in done:
+            if t is session_task and t.exception():
+                raise t.exception()
+    except asyncio.CancelledError:
+        pass
     except Exception as e:
         logger.error(f"[/unified] session error: {type(e).__name__}: {e}")
     finally:
@@ -434,10 +475,28 @@ async def ws_unified(websocket: WebSocket):
         if _active_unified_session["queue"] is nudge_input_queue:
             _active_unified_session["queue"] = None
             _active_unified_session["websocket"] = None
+        # 대화를 통째로 남기지 않고 요약해서 저장한다 — 특히 "요청했는데 이뤄지지
+        # 않은 것". 세션 종료를 막지 않도록 별도 태스크로 돌린다.
+        if transcript:
+            asyncio.create_task(_save_conversation_summary(transcript))
         try:
             await websocket.close()
         except Exception:
             pass
+
+
+async def _save_conversation_summary(transcript: list[dict]):
+    try:
+        result = await summarize(transcript)
+    except Exception as e:
+        logger.error(f"[/unified] 대화 요약 실패: {type(e).__name__}: {e}")
+        return
+    if not result:
+        return
+    admin_store.log_event("conversation", result)
+    unfulfilled = len(result.get("unfulfilled") or [])
+    logger.info(f"[/unified] 대화 요약 저장됨 — 발화 {result['turn_count']}건, "
+                f"미이행 요청 {unfulfilled}건")
 
 
 if __name__ == "__main__":
