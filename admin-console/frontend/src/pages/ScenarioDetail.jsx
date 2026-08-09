@@ -89,10 +89,10 @@ export default function ScenarioDetail() {
         </div>
       </header>
 
-      {/* 카메라가 무엇을 찾을지 — 지침(말하는 방식)과 역할이 다르므로 위에 따로 둔다 */}
+      {/* 이 시나리오가 언제 발동하는지 — 지침(대응 방식)과 역할이 다르므로 위에 따로 둔다 */}
       <section className="mb-10 bg-surface border border-line rounded-(--radius-card) px-7 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-          <h2 className="text-[32px] font-bold">카메라가 찾을 것</h2>
+          <h2 className="text-[32px] font-bold">감지 조건</h2>
           <div className="flex items-center gap-3">
             <span className="text-[22px] text-muted">몇 초마다 판단할까요</span>
             <select
@@ -108,12 +108,13 @@ export default function ScenarioDetail() {
           </div>
         </div>
         <p className="text-muted text-[22px] mb-4">
-          이 문장을 근거로 카메라 화면을 판단합니다. 구체적으로 쓸수록 정확해집니다.
+          이 조건에 맞으면 아래 지침대로 대응합니다. 무엇은 감지로 보지 않을지도 함께
+          적을수록 오작동이 줄어듭니다.
         </p>
         <textarea
-          aria-label="감지 기준"
+          aria-label="감지 조건"
           className={`${inputCls} h-32 py-4 leading-relaxed resize-none`}
-          placeholder="예: 사람이 알약이나 약봉투를 입 근처로 가져가는지 감지하라"
+          placeholder={"예: 어르신이 알약이나 약봉투를 입 근처로 가져가는지 판단하세요.\n다음은 감지로 보지 않습니다: 약통만 놓여 있는 경우."}
           value={scenario.detectPrompt || ""}
           onChange={(e) => setDetectPrompt(scenario.id, e.target.value)}
         />
@@ -129,7 +130,7 @@ export default function ScenarioDetail() {
 {`{"event": "${scenario.id === "fall" ? "fall" : "taken"}" 또는 "none", "confidence": 0.0~1.0, "reason": "판단 근거를 한 문장으로"}`}
             </pre>
             <p className="text-muted text-[19px] mt-2">
-              답변 형식은 자동으로 붙습니다. 위 입력칸에는 “무엇을 찾을지”만 쓰면 됩니다.
+              답변 형식은 자동으로 붙습니다. 위 입력칸에는 조건만 쓰면 됩니다.
             </p>
           </details>
         ) : (

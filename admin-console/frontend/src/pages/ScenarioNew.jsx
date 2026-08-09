@@ -53,7 +53,7 @@ export default function ScenarioNew() {
 
       <h1 className="text-[49px] font-bold mb-2">시나리오 추가</h1>
       <p className="text-muted text-[26px] mb-9">
-        카메라가 무엇을 찾을지 정하면, 감지됐을 때 동행이가 어떻게 대응할지는 다음 화면에서 지침으로 정합니다.
+        언제 발동할지 정하면, 감지됐을 때 동행이가 어떻게 대응할지는 다음 화면에서 지침으로 정합니다.
       </p>
 
       <section className="bg-surface border border-line rounded-(--radius-card) px-8 py-7 mb-8">
@@ -81,8 +81,8 @@ export default function ScenarioNew() {
         </Field>
 
         <Field
-          label="카메라가 찾을 것"
-          help="이 문장을 근거로 카메라 화면을 판단합니다. 무엇이 보이면 감지로 볼지, 무엇은 아닌지 함께 적을수록 오작동이 줄어듭니다."
+          label="감지 조건"
+          help="이 조건에 맞으면 시나리오가 발동합니다. 무엇은 감지로 보지 않을지도 함께 적을수록 오작동이 줄어듭니다."
         >
           <textarea
             className={`${inputCls} h-40 py-4 leading-relaxed resize-none`}
