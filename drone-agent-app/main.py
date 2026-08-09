@@ -57,6 +57,19 @@ PHONE_ACTIVE_WINDOW = 3.0
 
 # 페르소나(agent/persona.py)와 tool 정의(agent/tools.py)는 agent/ 아래로 분리했다.
 
+async def _record_medication_on_detect(websocket, result):
+    """카메라가 복용을 확인하면 모델을 거치지 않고 바로 기록한다."""
+    record = memory.record_medication_taken(note=result.get("reason", ""))
+    admin_store.log_event("medication_recorded", {"source": "vision", "record": record})
+    await websocket.send_json({
+        "type": "memory_update", "record": record,
+        "message": f"✅ {record['timestamp']} — {record['medication']} 복용 확인, 메모리 업데이트됨",
+    })
+
+
+# 감지되면 코드가 직접 하는 일. 시나리오 키별로만 있고, 없으면 넛지만 나간다.
+_ON_DETECT_SIDE_EFFECTS = {"medication": _record_medication_on_detect}
+
 # 현재 연결된 /ws/unified 세션 핸들 — "약 복용 알림" 버튼이 여기로 넛지를 주입한다.
 _active_unified_session = {"queue": None, "websocket": None}
 
@@ -374,8 +387,15 @@ async def ws_unified(websocket: WebSocket):
     _active_unified_session["queue"] = nudge_input_queue
     _active_unified_session["websocket"] = websocket
 
-    async def fall_vision_loop():
-        scenario = scenarios["fall"]
+    async def vision_loop(scenario: dict):
+        """시나리오 하나를 감시한다.
+
+        시나리오마다 함수를 따로 두면 콘솔에서 새로 만든 시나리오가 영영 돌지
+        않는다. 설정에서 온 시나리오를 그대로 받아 도는 하나의 루프로 두고,
+        켜져 있고 감지 기준이 있는 것마다 이 루프를 띄운다.
+        """
+        key = scenario.get("key", "?")
+        name = scenario.get("name", key)
         last_trigger_at = 0.0
         while True:
             await asyncio.sleep(2)
@@ -385,78 +405,53 @@ async def ws_unified(websocket: WebSocket):
             result = await detection_graph.ainvoke({
                 "frame": frame,
                 "prompt": scenario["detect_prompt"],
-                "target_event": scenario["target_event"],
-                "cooldown": scenario["cooldown"],
-                "min_confidence": scenario.get("min_confidence", 0.7),
+                "target_event": scenario.get("target_event", "event"),
+                "cooldown": float(scenario.get("cooldown", 10.0)),
+                "min_confidence": float(scenario.get("min_confidence", 0.7)),
                 "last_trigger_at": last_trigger_at,
-                "nudge_template": scenario["nudge_template"],
+                "nudge_template": scenario.get("nudge_template", ""),
             })
             if result.get("error"):
-                logger.error(f"[/unified:fall] detect error: {result['error']}")
-                await websocket.send_json({"type": "detect_result", "ok": False, "source": "fall", "error": result["error"]})
+                logger.error(f"[/unified:{key}] detect error: {result['error']}")
+                await websocket.send_json({"type": "detect_result", "ok": False,
+                                           "source": key, "label": name,
+                                           "error": result["error"]})
                 continue
 
             await websocket.send_json({
-                "type": "detect_result", "source": "fall", "ok": True,
+                "type": "detect_result", "source": key, "label": name, "ok": True,
                 "event": result.get("event"), "confidence": result.get("confidence"),
                 "reason": result.get("reason"),
             })
             last_trigger_at = result.get("new_last_trigger_at", last_trigger_at)
 
-            if result.get("should_trigger"):
-                logger.info(f"[/unified:fall] Fall detected! confidence={result.get('confidence')}")
-                await websocket.send_json({"type": "alert", "message": "낙상 감지! 즉시 확인이 필요합니다."})
-                nudge = result["nudge_text"]
-                await websocket.send_json({"type": "system_nudge", "text": nudge})
-                await nudge_input_queue.put(nudge)
-
-    async def medication_vision_loop():
-        scenario = scenarios["medication"]
-        last_trigger_at = 0.0
-        while True:
-            await asyncio.sleep(2)
-            frame = frame_buffer["data"]
-            if frame is None:
-                continue
-            result = await detection_graph.ainvoke({
-                "frame": frame,
-                "prompt": scenario["detect_prompt"],
-                "target_event": scenario["target_event"],
-                "cooldown": scenario["cooldown"],
-                "min_confidence": scenario.get("min_confidence", 0.7),
-                "last_trigger_at": last_trigger_at,
-                "nudge_template": scenario["nudge_template"],
-            })
-            if result.get("error"):
-                logger.error(f"[/unified:medication] detect error: {result['error']}")
-                await websocket.send_json({"type": "detect_result", "ok": False, "source": "medication", "error": result["error"]})
+            if not result.get("should_trigger"):
                 continue
 
+            logger.info(f"[/unified:{key}] {name} 감지됨 (confidence={result.get('confidence')})")
             await websocket.send_json({
-                "type": "detect_result", "source": "medication", "ok": True,
-                "event": result.get("event"), "confidence": result.get("confidence"),
-                "reason": result.get("reason"),
+                "type": "alert", "source": key,
+                "message": f"{name}! 즉시 확인이 필요합니다.",
             })
-            last_trigger_at = result.get("new_last_trigger_at", last_trigger_at)
 
-            if result.get("should_trigger"):
-                record = memory.record_medication_taken(note=result.get("reason", ""))
-                # 카메라 감지로 남긴 기록도 활동 기록에 넣는다 — 콘솔에서 "무슨 일이
-                # 있었나"를 볼 때 tool 호출과 같은 자리에 보여야 하기 때문.
-                admin_store.log_event("medication_recorded",
-                                      {"source": "vision", "record": record})
-                logger.info(f"[/unified:medication] Medication taken! record={record}")
-                await websocket.send_json({
-                    "type": "memory_update",
-                    "record": record,
-                    "message": f"✅ {record['timestamp']} — {record['medication']} 복용 확인, 메모리 업데이트됨",
-                })
-                nudge = result["nudge_text"]
+            # 감지 자체로 확정되는 부수 효과 (모델 판단을 거치지 않는 것)
+            side_effect = _ON_DETECT_SIDE_EFFECTS.get(key)
+            if side_effect:
+                await side_effect(websocket, result)
+
+            nudge = result.get("nudge_text") or ""
+            if nudge:
                 await websocket.send_json({"type": "system_nudge", "text": nudge})
                 await nudge_input_queue.put(nudge)
 
-    fall_task = asyncio.create_task(fall_vision_loop())
-    medication_task = asyncio.create_task(medication_vision_loop())
+    # 켜져 있고 감지 기준이 있는 시나리오마다 하나씩
+    vision_tasks = [
+        asyncio.create_task(vision_loop(sc))
+        for sc in scenarios.values()
+        if sc.get("enabled", True) and str(sc.get("detect_prompt", "")).strip()
+    ]
+    logger.info(f"[/unified] 감시 중인 시나리오: "
+                f"{[sc.get('name') for sc in scenarios.values() if sc.get('enabled', True) and sc.get('detect_prompt')]}")
 
     transcript: list[dict] = []
 
@@ -478,8 +473,8 @@ async def ws_unified(websocket: WebSocket):
         logger.error(f"[/unified] session error: {type(e).__name__}: {e}")
     finally:
         receive_task.cancel()
-        fall_task.cancel()
-        medication_task.cancel()
+        for t in vision_tasks:
+            t.cancel()
         if phone_task:
             phone_task.cancel()
         if _active_unified_session["queue"] is nudge_input_queue:

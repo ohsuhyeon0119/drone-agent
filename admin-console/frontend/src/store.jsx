@@ -205,6 +205,22 @@ export function StoreProvider({ children }) {
     versions: state.versions,
     changes: computeChanges(state.draft, state.live.config),
 
+    addScenario: (sc) =>
+      update((d) => {
+        d.scenarios.push({
+          id: sc.id, name: sc.name, enabled: true,
+          detectPrompt: sc.detectPrompt || "",
+          cooldown: sc.cooldown ?? 10,
+          nudgeTemplate: sc.nudgeTemplate || "",
+          instructions: sc.instructions || [],
+        });
+      }),
+    removeScenario: (id) =>
+      update((d) => { d.scenarios = d.scenarios.filter((s) => s.id !== id); }),
+    renameScenario: (id, name) =>
+      update((d) => { d.scenarios.find((s) => s.id === id).name = name; }),
+    setNudgeTemplate: (id, text) =>
+      update((d) => { d.scenarios.find((s) => s.id === id).nudgeTemplate = text; }),
     toggleScenario: (id, enabled) =>
       update((d) => { d.scenarios.find((s) => s.id === id).enabled = enabled; }),
     addInstruction: (id, text, action = null) =>

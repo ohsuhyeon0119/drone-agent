@@ -1,8 +1,9 @@
 # 이 파일은 관리 콘솔이 배포할 때 자동으로 씁니다 (원천: data/console.db).
-# 배포 버전 v4 · 2026-08-09 17:28
+# 배포 버전 v7 · 2026-08-09 17:42
 # 손으로 고쳐도 동작하지만, 다음 배포 때 덮어써집니다.
 key: fall
 name: 낙상 감지
+enabled: true
 target_event: fall
 cooldown: 10.0
 min_confidence: 0.7

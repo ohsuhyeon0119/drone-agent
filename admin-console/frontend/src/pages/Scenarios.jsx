@@ -1,9 +1,10 @@
-import { Link } from "react-router-dom";
-import { PageHeader, Toggle } from "../components/ui.jsx";
+import { Link, useNavigate } from "react-router-dom";
+import { Button, Toggle } from "../components/ui.jsx";
 import { useStore } from "../store.jsx";
 
 export default function Scenarios() {
   const { draft, toggleScenario } = useStore();
+  const navigate = useNavigate();
   const actionName = (id) => draft.actions.find((a) => a.id === id)?.name;
   /* 지침에 붙은 행동들 — 행동은 시나리오가 아니라 개별 지침에 붙는다 */
   const linkedActions = (s) =>
@@ -11,10 +12,16 @@ export default function Scenarios() {
 
   return (
     <>
-      <PageHeader
-        title="시나리오"
-        sub="감지할 상황과 대응 지침을 관리합니다."
-      />
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-9">
+        <div>
+          <h1 className="text-[49px] font-bold [text-wrap:balance]">시나리오</h1>
+          <p className="text-muted mt-2 text-[26px]">감지할 상황과 대응 지침을 관리합니다.</p>
+        </div>
+        <Button variant="primary" className="flex-none"
+                onClick={() => navigate("/scenarios/new")}>
+          시나리오 추가
+        </Button>
+      </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-6">
         {draft.scenarios.map((s) => (
           <div

@@ -91,9 +91,30 @@ def _load_override(key: str) -> dict | None:
 
 
 def load_scenarios() -> dict:
-    """key -> 시나리오 dict. agent/scenarios/<key>.yaml이 있으면 기본값 위에 덮어쓴다."""
-    scenarios = {}
-    for key, default in DEFAULT_SCENARIOS.items():
+    """key -> 시나리오 dict.
+
+    디렉토리를 훑어서 읽는다 — 기본값 키만 순회하면 관리 화면에서 새로 만든
+    시나리오(예: intrusion.yaml)가 영영 로드되지 않는다. 기본값은 파일이 없거나
+    깨졌을 때의 안전망 역할만 한다.
+
+    파일이 하나도 없으면(첫 실행) 기본값을 그대로 쓴다.
+    """
+    scenarios = {key: dict(default) for key, default in DEFAULT_SCENARIOS.items()}
+
+    found = sorted(SCENARIOS_DIR.glob("*.yaml")) if SCENARIOS_DIR.exists() else []
+    if not found:
+        return scenarios
+
+    # 파일이 있으면 그 목록이 곧 시나리오 목록이다 (콘솔에서 지운 것이 되살아나지 않게)
+    loaded: dict = {}
+    for path in found:
+        key = path.stem
         override = _load_override(key)
-        scenarios[key] = {**default, **override} if override else dict(default)
-    return scenarios
+        if override is None:
+            # 형식이 깨진 파일 — 기본값이 있으면 그것으로, 없으면 건너뛴다
+            if key in DEFAULT_SCENARIOS:
+                loaded[key] = dict(DEFAULT_SCENARIOS[key])
+            continue
+        base = DEFAULT_SCENARIOS.get(key, {"key": key, "name": key, "target_event": "event"})
+        loaded[key] = {**base, **override}
+    return loaded or scenarios

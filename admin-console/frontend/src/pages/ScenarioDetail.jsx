@@ -17,7 +17,8 @@ export default function ScenarioDetail() {
   const navigate = useNavigate();
   const {
     draft, toggleScenario, addInstruction, removeInstruction, updateInstruction,
-    setInstructionAction, setDetectPrompt, setCooldown, changes,
+    setInstructionAction, setDetectPrompt, setCooldown, setNudgeTemplate,
+    removeScenario, changes,
   } = useStore();
   const scenario = draft.scenarios.find((s) => s.id === id);
 
@@ -138,6 +139,20 @@ export default function ScenarioDetail() {
         )}
       </section>
 
+      <section className="mb-10 bg-surface border border-line rounded-(--radius-card) px-7 py-6">
+        <h2 className="text-[32px] font-bold mb-2">감지되면 동행이에게 전할 신호</h2>
+        <p className="text-muted text-[22px] mb-4">
+          동행이가 이 신호를 받고 하던 말을 멈춘 뒤 먼저 말을 겁니다.
+        </p>
+        <textarea
+          aria-label="감지 신호 문구"
+          className={`${inputCls} h-28 py-4 leading-relaxed resize-none`}
+          placeholder="[SYSTEM] …이 감지되었습니다. 어르신께 확인해 보세요."
+          value={scenario.nudgeTemplate || ""}
+          onChange={(e) => setNudgeTemplate(scenario.id, e.target.value)}
+        />
+      </section>
+
       <section className="mb-10">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
@@ -222,6 +237,10 @@ export default function ScenarioDetail() {
             : "변경 사항이 없습니다."}
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="danger"
+                  onClick={() => { removeScenario(scenario.id); navigate("/scenarios"); }}>
+            이 시나리오 삭제
+          </Button>
           <Button onClick={() => navigate("/scenarios")}>수정 완료</Button>
           {changes.length > 0 && (
             <Button variant="primary" onClick={() => navigate("/deploy")}>

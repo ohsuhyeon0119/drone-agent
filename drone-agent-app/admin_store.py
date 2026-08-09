@@ -475,12 +475,20 @@ def _export_live(conn: sqlite3.Connection, agent_id: int = DEFAULT_AGENT_ID):
         ensure_ascii=False, indent=1,
     ))
 
+    # 설정에 없는 yaml은 지운다 — 콘솔에서 삭제한 시나리오가 파일로 남아 되살아나지 않게.
+    keep = {f"{s['key']}.yaml" for s in bundle.get("scenarios", []) if s.get("key")}
+    if os.path.isdir(SCENARIOS_DIR):
+        for name in os.listdir(SCENARIOS_DIR):
+            if name.endswith(".yaml") and name not in keep:
+                os.remove(os.path.join(SCENARIOS_DIR, name))
+                logger.info(f"[admin_store] 삭제된 시나리오 파일 정리: {name}")
+
     for s in bundle.get("scenarios", []):
-        if not s.get("enabled", True):
-            continue  # 꺼진 시나리오는 yaml을 갱신하지 않는다 (에이전트에 on/off 개념이 아직 없음)
         doc = {
             "key": s["key"],
             "name": s["name"],
+            # 꺼진 시나리오도 파일로 남긴다 — 지운 것과 잠시 끈 것은 다르다
+            "enabled": bool(s.get("enabled", True)),
             "target_event": s.get("target_event", "event"),
             "cooldown": float(s.get("cooldown", 10.0)),
             # 이 값 미만의 확신도는 트리거하지 않는다 — 빠지면 기본값에 의존하게 되므로
