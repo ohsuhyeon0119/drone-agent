@@ -68,7 +68,7 @@ export function RequireAuth({ children }) {
     /* 확인이 끝나기 전에 화면을 그리면, 로그인되지 않은 사람에게도 관리 화면이
        한순간 보였다가 사라진다. */
     return (
-      <div className="min-h-screen flex items-center justify-center text-muted text-[19px]">
+      <div className="min-h-screen flex items-center justify-center text-muted text-[15px]">
         확인 중…
       </div>
     );

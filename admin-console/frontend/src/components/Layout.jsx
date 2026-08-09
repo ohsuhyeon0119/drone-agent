@@ -97,10 +97,10 @@ export default function Layout() {
         >
           <IconMenu />
         </button>
-        <div className="font-bold text-[16px]">에이전트 관리</div>
+        <div className="font-bold text-[13px]">에이전트 관리</div>
         <button
           onClick={() => navigate("/deploy")}
-          className={`h-9 px-3 rounded-full text-[15px] font-bold tabular-nums cursor-pointer
+          className={`h-9 px-3 rounded-full text-[12px] font-bold tabular-nums cursor-pointer
             ${changes.length ? "bg-warnsoft text-warn" : "bg-accentsoft text-accent"}`}
         >
           v{live.version}{changes.length > 0 && ` · ${changes.length}`}
@@ -120,10 +120,10 @@ export default function Layout() {
         /* 본문이 길면 사이드바도 페이지 높이만큼 늘어나서, 아래에 붙인 계정·로그아웃이
            화면 밖으로 밀려 보이지 않는다. 화면 높이에 고정하고 안쪽에서만 스크롤한다. */
         className={`flex flex-col bg-surface border-r border-line transition-[width,transform] duration-200
-          fixed inset-y-0 left-0 z-50 w-[240px]
+          fixed inset-y-0 left-0 z-50 w-[192px]
           md:sticky md:top-0 md:h-screen md:self-start md:z-auto md:flex-none md:translate-x-0
           ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
-          ${open ? "md:w-[240px]" : "md:w-[72px]"}`}
+          ${open ? "md:w-[192px]" : "md:w-[58px]"}`}
       >
         <SidebarContent
           open={open}
@@ -143,11 +143,11 @@ export default function Layout() {
           {/* 설정을 서버에서 받아오기 전에 화면을 그리면 "시나리오 없음"이 잠깐
               보였다가 채워진다 — 지운 줄 알고 다시 만들게 된다. */}
           {ready ? <Outlet /> : (
-            <p className="text-muted text-[19px] py-10">설정을 불러오는 중…</p>
+            <p className="text-muted text-[15px] py-10">설정을 불러오는 중…</p>
           )}
           {error && (
             <p role="alert"
-               className="mt-6 text-warn text-[18px] bg-warnsoft border border-warn/30 rounded-(--radius-card) px-6 py-4">
+               className="mt-6 text-warn text-[14px] bg-warnsoft border border-warn/30 rounded-(--radius-card) px-6 py-4">
               {error}
             </p>
           )}
@@ -163,10 +163,10 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, l
   const labelCls = open ? "" : "md:hidden";
   return (
     <>
-      <div className={`flex items-center h-[74px] border-b border-line px-5 ${open ? "justify-between" : "md:px-0 md:justify-center justify-between"}`}>
+      <div className={`flex items-center h-[59px] border-b border-line px-5 ${open ? "justify-between" : "md:px-0 md:justify-center justify-between"}`}>
         <div className={`leading-tight ${labelCls}`}>
-          <div className="font-bold text-[22px] whitespace-nowrap">에이전트 관리</div>
-          <div className="text-[13px] text-muted mt-1 whitespace-nowrap">함께 나는 에이전트</div>
+          <div className="font-bold text-[18px] whitespace-nowrap">에이전트 관리</div>
+          <div className="text-[11px] text-muted mt-1 whitespace-nowrap">함께 나는 에이전트</div>
         </div>
         <button
           aria-label={open ? "메뉴 접기" : "메뉴 펼치기"}
@@ -192,7 +192,7 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, l
             title={label}
             onClick={closeMobile}
             className={({ isActive }) =>
-              `flex items-center gap-3.5 h-14 text-[19px] rounded-(--radius-ctl) transition-colors duration-150 px-4
+              `flex items-center gap-3.5 h-14 text-[15px] rounded-(--radius-ctl) transition-colors duration-150 px-4
                ${open ? "" : "md:px-0 md:justify-center"}
                ${isActive ? "bg-accentsoft text-accent font-semibold" : "text-muted hover:text-ink"}`
             }
@@ -203,12 +203,12 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, l
         ))}
         <div
           title="활동 기록 (준비 중)"
-          className={`flex items-center gap-3.5 h-14 text-[19px] rounded-(--radius-ctl) text-muted/45 cursor-not-allowed px-4
+          className={`flex items-center gap-3.5 h-14 text-[15px] rounded-(--radius-ctl) text-muted/45 cursor-not-allowed px-4
             ${open ? "" : "md:px-0 md:justify-center"}`}
         >
           <IconClock />
           <span className={`whitespace-nowrap ${labelCls}`}>
-            활동 기록 <span className="text-[14px]">· 준비 중</span>
+            활동 기록 <span className="text-[11px]">· 준비 중</span>
           </span>
         </div>
 
@@ -217,8 +217,8 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, l
         <div className="mt-auto pt-3 border-t border-line">
           {user && (
             <div className={`px-4 pb-2 ${labelCls}`}>
-              <div className="text-[18px] font-bold truncate">{user.name}</div>
-              <div className="text-[14px] text-muted truncate" title={user.email}>
+              <div className="text-[14px] font-bold truncate">{user.name}</div>
+              <div className="text-[11px] text-muted truncate" title={user.email}>
                 {user.email}
               </div>
             </div>
@@ -226,7 +226,7 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, l
           <button
             onClick={() => { closeMobile(); logout(); navigate("/login", { replace: true }); }}
             title={user ? `로그아웃 (${user.email})` : "로그아웃"}
-            className={`w-full flex items-center gap-3.5 h-14 text-[19px] rounded-(--radius-ctl) px-4
+            className={`w-full flex items-center gap-3.5 h-14 text-[15px] rounded-(--radius-ctl) px-4
               text-muted hover:text-ink transition-colors duration-150 cursor-pointer
               ${open ? "" : "md:px-0 md:justify-center"}`}
           >
@@ -243,10 +243,10 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, l
           ${open ? "" : "md:px-0 md:flex md:justify-center"}`}
       >
         <span className={labelCls}>
-          <span className="block text-[15px] tracking-wide text-muted">
+          <span className="block text-[12px] tracking-wide text-muted">
             현재 적용 버전{saving && <span className="ml-2">저장 중…</span>}
           </span>
-          <span className="font-bold tabular-nums text-[19px]">
+          <span className="font-bold tabular-nums text-[15px]">
             Live v{live.version}
             {changes.length > 0 && (
               <span className="text-warn font-semibold"> · 수정 {changes.length}건</span>
@@ -254,7 +254,7 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, l
           </span>
         </span>
         {!open && (
-          <span className="hidden md:inline font-bold tabular-nums text-[18px]">v{live.version}</span>
+          <span className="hidden md:inline font-bold tabular-nums text-[14px]">v{live.version}</span>
         )}
       </button>
     </>

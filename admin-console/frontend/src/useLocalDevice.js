@@ -33,12 +33,41 @@ function loadMediaHandler() {
  *   내 계정의 설정·프로필이 아니라 남의 것으로 돌고, 모니터에도 안 보인다.
  * @param {boolean} opts.withAudio 마이크·스피커까지 쓸지 (false면 카메라만)
  */
+/* 카메라·마이크 권한을 한 번에 물어본다.
+   media-handler는 영상과 소리를 따로 요청하는데, 그러면 허용 창이 두 번 뜬다.
+   두 번째(마이크)를 놓치거나 닫으면 "카메라는 되는데 마이크만 안 되는" 상태가
+   되고, 화면에는 아무 설명도 남지 않는다. */
+async function requestPermission(withAudio) {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: true, audio: withAudio,
+  });
+  stream.getTracks().forEach((t) => t.stop());
+}
+
+function permissionMessage(e) {
+  switch (e?.name) {
+    case "NotAllowedError":
+      return "카메라·마이크 사용이 차단되어 있습니다. 주소창 왼쪽의 자물쇠를 눌러 허용해 주세요.";
+    case "NotFoundError":
+      return "카메라나 마이크를 찾지 못했습니다. 연결 상태를 확인해 주세요.";
+    case "NotReadableError":
+      return "다른 프로그램이 카메라·마이크를 쓰고 있습니다. 그 프로그램을 끄고 다시 시도해 주세요.";
+    default:
+      return e?.message || "카메라·마이크를 열지 못했습니다.";
+  }
+}
+
 export function useLocalDevice({ agentId, withAudio = true } = {}) {
   const [state, setState] = useState("idle"); // idle | starting | live | error
   const [error, setError] = useState("");
+  /* 마이크가 실제로 소리를 받고 있는지 눈으로 확인할 수 있게 한다.
+     소리는 보이지 않아서, 표시가 없으면 안 되는 건지 조용한 건지 알 수 없다. */
+  const [micLevel, setMicLevel] = useState(0);
+  const [micOn, setMicOn] = useState(false);
   const videoRef = useRef(null);
   const handlerRef = useRef(null);
   const wsRef = useRef(null);
+  const meterRef = useRef(null);
   /* 정리 중에 onclose가 다시 stop을 부르는 것을 막는다 */
   const stopping = useRef(false);
 
@@ -47,6 +76,10 @@ export function useLocalDevice({ agentId, withAudio = true } = {}) {
     const ws = wsRef.current;
     wsRef.current = null;
     if (ws && ws.readyState <= 1) ws.close();
+
+    if (meterRef.current) { cancelAnimationFrame(meterRef.current); meterRef.current = null; }
+    setMicLevel(0);
+    setMicOn(false);
 
     const h = handlerRef.current;
     if (h) {
@@ -58,6 +91,26 @@ export function useLocalDevice({ agentId, withAudio = true } = {}) {
     stopping.current = false;
   }, []);
 
+  /* 마이크가 실제로 소리를 받고 있는지 화면에 보여준다.
+     보내는 쪽에서 조용히 실패하면 "말했는데 반응이 없다"는 것만 남고 원인을
+     알 수 없다. 입력 크기를 그리면 마이크 문제인지 그 뒤 문제인지 갈린다. */
+  const startMeter = useCallback((h) => {
+    if (!h.audioContext || !h.mediaStream) return;
+    const analyser = h.audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    h.audioContext.createMediaStreamSource(h.mediaStream).connect(analyser);
+    const buf = new Uint8Array(analyser.frequencyBinCount);
+    const tick = () => {
+      analyser.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (const v of buf) peak = Math.max(peak, Math.abs(v - 128));
+      setMicLevel(Math.min(1, peak / 40)); // 말소리 크기에서 눈에 띄게
+      meterRef.current = requestAnimationFrame(tick);
+    };
+    setMicOn(true);
+    tick();
+  }, []);
+
   const start = useCallback(async () => {
     setError("");
     setState("starting");
@@ -65,6 +118,16 @@ export function useLocalDevice({ agentId, withAudio = true } = {}) {
       const MediaHandler = await loadMediaHandler();
       if (!handlerRef.current) handlerRef.current = new MediaHandler();
       const h = handlerRef.current;
+
+      /* 허용 창을 한 번만 띄운다. 뒤에서 영상·소리를 따로 요청하지만 이미
+         허용된 뒤라 다시 묻지 않는다. */
+      try {
+        await requestPermission(withAudio);
+      } catch (e) {
+        setError(permissionMessage(e));
+        setState("error");
+        return;
+      }
 
       /* 오디오 컨텍스트는 사용자의 클릭 안에서 열어야 브라우저가 막지 않는다 */
       if (withAudio) await h.initializeAudio();
@@ -77,17 +140,26 @@ export function useLocalDevice({ agentId, withAudio = true } = {}) {
 
       ws.onopen = async () => {
         try {
+          /* 마이크를 먼저 연다. 카메라부터 열면 그 사이 한 말이 통째로 빠지는데,
+             쓰는 사람은 "시작을 눌렀으니 듣고 있겠지" 하고 바로 말을 건다. */
+          if (withAudio) {
+            try {
+              await h.startAudio((pcm) => {
+                if (ws.readyState === 1) ws.send(pcm);
+              });
+              startMeter(h);
+            } catch (e) {
+              /* 마이크만 실패했다고 카메라까지 끄지 않는다. 감지는 계속 돌아야
+                 하고, 무엇이 안 되는지도 화면에 남아야 한다. */
+              setError(`${permissionMessage(e)} (소리 없이 감지만 동작합니다)`);
+            }
+          }
           await h.startVideo(videoRef.current, (base64) => {
             if (ws.readyState === 1) ws.send(JSON.stringify({ type: "image", data: base64 }));
           });
-          if (withAudio) {
-            await h.startAudio((pcm) => {
-              if (ws.readyState === 1) ws.send(pcm);
-            });
-          }
           setState("live");
         } catch (e) {
-          setError(e.message || "카메라·마이크를 열지 못했습니다.");
+          setError(permissionMessage(e));
           setState("error");
           stop();
         }
@@ -119,10 +191,10 @@ export function useLocalDevice({ agentId, withAudio = true } = {}) {
       setError(e.message || "시작하지 못했습니다.");
       setState("error");
     }
-  }, [agentId, withAudio, stop]);
+  }, [agentId, withAudio, stop, startMeter]);
 
   // 화면을 떠날 때 카메라·마이크를 반드시 끈다 (표시등이 켜진 채 남으면 안 된다)
   useEffect(() => () => stop(), [stop]);
 
-  return { videoRef, state, error, start, stop };
+  return { videoRef, state, error, micOn, micLevel, start, stop };
 }

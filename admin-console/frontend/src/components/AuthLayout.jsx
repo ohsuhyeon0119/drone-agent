@@ -7,14 +7,14 @@ export default function AuthLayout({ title, sub, children }) {
       {/* items-center는 내용이 칸보다 길면 위아래를 잘라낸다(스크롤로도 못 본다).
           m-auto는 넘칠 때 잘리지 않고 스크롤이 걸린다. */}
       <section className="bg-accent text-white flex overflow-y-auto px-10 sm:px-14 xl:px-20 py-12">
-        <div className="max-w-[720px] m-auto">
-          <div className="text-[16px] font-bold tracking-[0.22em] text-white/70 mb-6">
+        <div className="max-w-[576px] m-auto">
+          <div className="text-[13px] font-bold tracking-[0.22em] text-white/70 mb-6">
             DONGHAENG
           </div>
-          <h1 className="text-[32px] xl:text-[38px] font-bold leading-[1.25] [text-wrap:balance]">
+          <h1 className="text-[26px] xl:text-[30px] font-bold leading-[1.25] [text-wrap:balance]">
             노후를 함께 나는 동행자
           </h1>
-          <p className="text-[19px] text-white/85 mt-5 leading-relaxed [text-wrap:pretty]">
+          <p className="text-[15px] text-white/85 mt-5 leading-relaxed [text-wrap:pretty]">
             카메라와 목소리로 어르신 곁을 지키는 돌봄 에이전트를 설계합니다.
           </p>
 
@@ -27,9 +27,9 @@ export default function AuthLayout({ title, sub, children }) {
               ["되돌리기", "배포한 설정은 버전으로 남습니다"],
             ].map(([term, desc]) => (
               /* grid여야 설명이 길어져도 항목 이름 열이 어긋나지 않는다. */
-              <div key={term} className="grid grid-cols-[130px_1fr] gap-x-5 items-baseline">
-                <dt className="text-[18px] font-bold">{term}</dt>
-                <dd className="text-[18px] text-white/70">{desc}</dd>
+              <div key={term} className="grid grid-cols-[104px_1fr] gap-x-5 items-baseline">
+                <dt className="text-[14px] font-bold">{term}</dt>
+                <dd className="text-[14px] text-white/70">{desc}</dd>
               </div>
             ))}
           </dl>
@@ -37,9 +37,9 @@ export default function AuthLayout({ title, sub, children }) {
       </section>
 
       <section className="flex overflow-y-auto px-10 sm:px-16 py-10">
-        <div className="w-full max-w-[620px] m-auto">
-          <h2 className="text-[26px] font-bold mb-1">{title}</h2>
-          <p className="text-muted text-[19px] mb-8">{sub}</p>
+        <div className="w-full max-w-[496px] m-auto">
+          <h2 className="text-[21px] font-bold mb-1">{title}</h2>
+          <p className="text-muted text-[15px] mb-8">{sub}</p>
           {children}
         </div>
       </section>

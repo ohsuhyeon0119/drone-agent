@@ -18,21 +18,21 @@ export default function Deploy() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
         <div className="bg-surface border border-line rounded-(--radius-card) p-7">
-          <div className="text-[16px] tracking-wide text-muted mb-1.5">현재 적용 버전</div>
-          <div className="text-[24px] font-bold tabular-nums">Live v{live.version}</div>
-          <div className="text-muted text-[18px] tabular-nums mt-1">{live.publishedAt} 배포됨</div>
+          <div className="text-[13px] tracking-wide text-muted mb-1.5">현재 적용 버전</div>
+          <div className="text-[19px] font-bold tabular-nums">Live v{live.version}</div>
+          <div className="text-muted text-[14px] tabular-nums mt-1">{live.publishedAt} 배포됨</div>
         </div>
         <div className={`rounded-(--radius-card) p-7 border ${changes.length ? "bg-warnsoft border-warn/40" : "bg-surface border-line"}`}>
-          <div className="text-[16px] tracking-wide text-muted mb-1.5">편집 중</div>
-          <div className="text-[24px] font-bold">
+          <div className="text-[13px] tracking-wide text-muted mb-1.5">편집 중</div>
+          <div className="text-[19px] font-bold">
             {changes.length ? <span className="text-warn">수정 {changes.length}건</span> : "변경 없음"}
           </div>
-          <div className="text-muted text-[18px]">배포 후 적용됩니다</div>
+          <div className="text-muted text-[14px]">배포 후 적용됩니다</div>
         </div>
       </div>
 
       <section className="mb-8">
-        <h2 className="text-[24px] font-bold mb-4">변경 사항</h2>
+        <h2 className="text-[19px] font-bold mb-4">변경 사항</h2>
         {changes.length === 0 ? (
           <EmptyState>변경 사항이 없습니다. 시나리오나 연락처를 수정하면 여기에 표시됩니다.</EmptyState>
         ) : (
@@ -41,7 +41,7 @@ export default function Deploy() {
               {changes.map((c, i) => (
                 <li
                   key={i}
-                  className="bg-surface border border-line rounded-(--radius-card) border-l-4 border-l-accent px-7 py-6 text-[19px] leading-relaxed"
+                  className="bg-surface border border-line rounded-(--radius-card) border-l-4 border-l-accent px-7 py-6 text-[15px] leading-relaxed"
                 >
                   {c}
                 </li>
@@ -55,11 +55,11 @@ export default function Deploy() {
       </section>
 
       <section>
-        <h2 className="text-[24px] font-bold mb-4">배포 기록</h2>
+        <h2 className="text-[19px] font-bold mb-4">배포 기록</h2>
         <div className="overflow-x-auto bg-surface border border-line rounded-(--radius-card)">
-          <table className="w-full min-w-[540px] border-collapse">
+          <table className="w-full min-w-[432px] border-collapse">
             <thead>
-              <tr className="text-left text-[16px] tracking-wide text-muted border-b border-line">
+              <tr className="text-left text-[13px] tracking-wide text-muted border-b border-line">
                 <th className="font-semibold px-6 py-5">버전</th>
                 <th className="font-semibold px-6 py-5">배포 시각</th>
                 <th className="font-semibold px-6 py-5">변경 내용</th>
@@ -69,14 +69,14 @@ export default function Deploy() {
             <tbody>
               {[...versions].reverse().map((v) => (
                 <tr key={v.version} className="border-b border-line last:border-b-0 align-top">
-                  <td className="px-7 py-7 font-bold text-[21px] tabular-nums whitespace-nowrap">
+                  <td className="px-7 py-7 font-bold text-[17px] tabular-nums whitespace-nowrap">
                     v{v.version}
                     {v.version === live.version && (
-                      <span className="ml-3 text-[16px] font-bold bg-accentsoft text-accent rounded-full px-2.5 py-0.5 align-middle">Live</span>
+                      <span className="ml-3 text-[13px] font-bold bg-accentsoft text-accent rounded-full px-2.5 py-0.5 align-middle">Live</span>
                     )}
                   </td>
-                  <td className="px-7 py-7 text-ink text-[19px] tabular-nums whitespace-nowrap">{v.publishedAt}</td>
-                  <td className="px-7 py-7 text-[19px] text-ink leading-relaxed">
+                  <td className="px-7 py-7 text-ink text-[15px] tabular-nums whitespace-nowrap">{v.publishedAt}</td>
+                  <td className="px-7 py-7 text-[15px] text-ink leading-relaxed">
                     {v.changes.slice(0, 2).map((c, i) => <div key={i}>{c}</div>)}
                     {v.changes.length > 2 && <div>외 {v.changes.length - 2}건</div>}
                   </td>
@@ -86,7 +86,7 @@ export default function Deploy() {
                     {v.version !== live.version && (
                       <Button
                         onClick={() => setRollbackTo(v.version)}
-                        className="h-14 px-5 text-[18px]"
+                        className="h-14 px-5 text-[14px]"
                       >
                         이 버전으로 롤백
                       </Button>
@@ -125,7 +125,7 @@ export default function Deploy() {
         <div className="flex flex-col gap-3 mb-7">
           <div className="border border-line rounded-(--radius-card) p-5">
             <div className="font-bold mb-1">지금 바로 적용</div>
-            <p className="text-muted text-[18px]">
+            <p className="text-muted text-[14px]">
               v{rollbackTo} 설정을 v{nextVersion}으로 즉시 배포합니다. 문제가 생겼을 때 가장 빠른 복구 방법입니다.
             </p>
             <Button
@@ -141,7 +141,7 @@ export default function Deploy() {
           </div>
           <div className="border border-line rounded-(--radius-card) p-5">
             <div className="font-bold mb-1">불러와서 확인 후 배포</div>
-            <p className="text-muted text-[18px]">
+            <p className="text-muted text-[14px]">
               v{rollbackTo} 설정을 편집 상태로 불러옵니다. 내용을 확인하고 직접 배포합니다.
             </p>
             <Button

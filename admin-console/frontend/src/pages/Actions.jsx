@@ -16,8 +16,8 @@ export default function Actions() {
     <>
       <div className="flex flex-wrap items-start justify-between gap-4 mb-9">
         <div>
-          <h1 className="text-[34px] font-bold [text-wrap:balance]">행동</h1>
-          <p className="text-muted mt-2 text-[19px]">
+          <h1 className="text-[27px] font-bold [text-wrap:balance]">행동</h1>
+          <p className="text-muted mt-2 text-[15px]">
             동행이가 실제로 할 수 있는 일입니다. 시나리오에서 “감지 시 실행할 행동”으로 연결해 사용합니다.
           </p>
         </div>
@@ -28,9 +28,9 @@ export default function Actions() {
         <EmptyState>등록된 행동이 없습니다.</EmptyState>
       ) : (
         <div className="overflow-x-auto bg-surface border border-line rounded-(--radius-card)">
-          <table className="w-full min-w-[720px] border-collapse">
+          <table className="w-full min-w-[576px] border-collapse">
             <thead>
-              <tr className="text-left text-[22px] font-bold text-muted border-b border-line">
+              <tr className="text-left text-[18px] font-bold text-muted border-b border-line">
                 <th className="px-7 py-6">이름</th>
                 <th className="px-7 py-6">동행이가 이 행동을 쓸 때</th>
                 <th className="px-7 py-6">필요한 정보</th>
@@ -44,16 +44,16 @@ export default function Actions() {
                 return (
                   <tr key={a.id} className="border-b border-line last:border-b-0 align-top">
                     <td className="px-7 py-7 whitespace-nowrap">
-                      <Link to={`/actions/${a.id}`} className="block font-bold text-[21px] hover:text-accent">{a.name}</Link>
-                      <span className="inline-block mt-2 text-[15px] font-bold bg-accentsoft text-accent rounded-full px-3.5 py-1.5">
+                      <Link to={`/actions/${a.id}`} className="block font-bold text-[17px] hover:text-accent">{a.name}</Link>
+                      <span className="inline-block mt-2 text-[12px] font-bold bg-accentsoft text-accent rounded-full px-3.5 py-1.5">
                         {KIND_LABEL[a.kind] || a.kind}
                       </span>
                     </td>
-                    <td className="px-7 py-7 text-ink text-[19px] leading-relaxed">{a.description}</td>
-                    <td className="px-7 py-7 text-ink text-[19px]">
+                    <td className="px-7 py-7 text-ink text-[15px] leading-relaxed">{a.description}</td>
+                    <td className="px-7 py-7 text-ink text-[15px]">
                       {a.params?.map((p) => p.name).join(", ") || "—"}
                     </td>
-                    <td className="px-7 py-7 text-[18px]">
+                    <td className="px-7 py-7 text-[14px]">
                       {users.length === 0 ? (
                         <span className="text-muted/60">연결 안 됨</span>
                       ) : (

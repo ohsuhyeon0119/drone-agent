@@ -7,9 +7,9 @@ import { answerInterview, finishInterview, startInterview } from "../api.js";
    선택지가 화면 밖으로 밀려 "다음에 뭘 해야 하는지"가 사라지므로, 이 흐름에서는
    화면을 절대 넘기지 않는 것을 제약으로 둔다.
 
-   그래서 여기서는 콘솔의 기준 글자 크기(26px)에 기대지 않고 px를 직접 쓴다 —
-   rem 기반 유틸리티는 이 기준에서 여백 하나가 30~130px이 되어 4지선다를 한
-   화면에 담을 수 없다.
+   그래서 여기서는 콘솔의 기준 글자 크기에 기대지 않고 px를 직접 쓴다 —
+   rem 기반 여백은 기준이 바뀔 때마다 같이 움직여서, 4지선다가 한 화면에
+   들어가는지가 설정 하나에 좌우된다.
 
    질문·되묻기·순서는 서버(agent/interviewer.py)가 정한다. 화면은 받은 질문을
    그리고 답을 돌려줄 뿐이다. 설계 근거는 personalization.plan.md §3. */
@@ -27,12 +27,12 @@ function ProgressBar({ value }) {
 
 function TopBar({ onBack, onQuit, canGoBack }) {
   return (
-    <div className="flex-none h-[64px] flex items-center justify-between">
+    <div className="flex-none h-[51px] flex items-center justify-between">
       <button
         onClick={onBack}
         disabled={!canGoBack}
         aria-label="이전 질문"
-        className="w-[44px] h-[44px] -ml-[10px] flex items-center justify-center rounded-full
+        className="w-[35px] h-[35px] -ml-[10px] flex items-center justify-center rounded-full
                    text-ink disabled:opacity-25 cursor-pointer disabled:cursor-default"
       >
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -42,7 +42,7 @@ function TopBar({ onBack, onQuit, canGoBack }) {
       </button>
       <button
         onClick={onQuit}
-        className="text-[17px] text-muted hover:text-ink cursor-pointer px-2 py-1"
+        className="text-[14px] text-muted hover:text-ink cursor-pointer px-2 py-1"
       >
         나중에 할게요
       </button>
@@ -57,7 +57,7 @@ function Choice({ label, onPick, disabled, picked }) {
     <button
       onClick={() => onPick(label)}
       disabled={disabled}
-      className={`w-full text-left px-[22px] py-[19px] rounded-[16px] border-2 text-[21px] font-semibold
+      className={`w-full text-left px-[18px] py-[15px] rounded-[16px] border-2 text-[17px] font-semibold
                   transition-[background-color,border-color,transform] duration-150 cursor-pointer
                   active:scale-[0.985] disabled:cursor-default
                   ${picked
@@ -88,12 +88,12 @@ const SUMMARY_ROWS = [
 function Summary({ profile, onConfirm, onRedo, busy }) {
   const rows = SUMMARY_ROWS.map(([label, get]) => [label, get(profile)]).filter(([, v]) => v);
   return (
-    <div className="h-screen flex flex-col overflow-hidden max-w-[560px] mx-auto px-[24px]">
-      <div className="flex-none pt-[40px] pb-[20px]">
-        <h1 className="text-[32px] font-bold leading-[1.3] [text-wrap:balance]">
+    <div className="h-screen flex flex-col overflow-hidden max-w-[448px] mx-auto px-[19px]">
+      <div className="flex-none pt-[32px] pb-[16px]">
+        <h1 className="text-[26px] font-bold leading-[1.3] [text-wrap:balance]">
           {profile.name ? `${profile.name} 어르신을` : "어르신을"}<br />이렇게 이해했어요
         </h1>
-        <p className="text-[17px] text-muted mt-[10px]">
+        <p className="text-[14px] text-muted mt-[8px]">
           동행이가 이 내용을 바탕으로 말을 겁니다.
         </p>
       </div>
@@ -101,48 +101,48 @@ function Summary({ profile, onConfirm, onRedo, busy }) {
       {/* 이 화면만 안쪽 스크롤을 허용하므로, 아래가 잘린 게 아니라 더 있다는 걸
           보이게 한다 — 끝인 줄 알고 넘어가면 확인하라고 만든 화면이 무의미해진다. */}
       <div className="relative flex-1 min-h-0">
-        <div className="h-full overflow-y-auto -mx-[4px] px-[4px] pb-[18px]">
+        <div className="h-full overflow-y-auto -mx-[4px] px-[4px] pb-[14px]">
           <dl className="bg-surface border border-line rounded-[16px] divide-y divide-line">
             {rows.map(([label, value]) => (
-              <div key={label} className="flex items-baseline gap-[16px] px-[20px] py-[13px]">
-                <dt className="w-[124px] flex-none text-[16px] text-muted">{label}</dt>
-                <dd className="text-[19px] font-semibold">{value}</dd>
+              <div key={label} className="flex items-baseline gap-[13px] px-[16px] py-[10px]">
+                <dt className="w-[99px] flex-none text-[13px] text-muted">{label}</dt>
+                <dd className="text-[15px] font-semibold">{value}</dd>
               </div>
             ))}
           </dl>
 
         {(profile.notes || []).length > 0 && (
-          <div className="mt-[12px] bg-accentsoft rounded-[16px] px-[20px] py-[16px]">
-            <p className="text-[16px] font-bold text-accent mb-[8px]">특별히 신경 쓸 점</p>
-            <ul className="flex flex-col gap-[8px]">
+          <div className="mt-[10px] bg-accentsoft rounded-[16px] px-[16px] py-[13px]">
+            <p className="text-[13px] font-bold text-accent mb-[6px]">특별히 신경 쓸 점</p>
+            <ul className="flex flex-col gap-[6px]">
               {profile.notes.map((n, i) => (
-                <li key={i} className="text-[17px] leading-[1.55]">{n}</li>
+                <li key={i} className="text-[14px] leading-[1.55]">{n}</li>
               ))}
             </ul>
           </div>
         )}
 
           {(profile.unknown || []).length > 0 && (
-            <p className="text-[15px] text-muted mt-[12px] mb-[4px]">
+            <p className="text-[12px] text-muted mt-[10px] mb-[4px]">
               알려주지 않으신 {profile.unknown.length}개는 비워 두었습니다. 나중에 채우셔도 됩니다.
             </p>
           )}
         </div>
         {/* 목록이 화면보다 길 때만 아래쪽을 흐리게 해 "더 있다"는 신호를 준다 */}
-        <div className="pointer-events-none absolute bottom-0 inset-x-0 h-[28px]
+        <div className="pointer-events-none absolute bottom-0 inset-x-0 h-[22px]
                         bg-gradient-to-t from-bg to-transparent" />
       </div>
 
-      <div className="flex-none pt-[16px] pb-[28px] flex flex-col gap-[10px]">
+      <div className="flex-none pt-[13px] pb-[22px] flex flex-col gap-[8px]">
         <button
           onClick={onConfirm}
           disabled={busy}
-          className="w-full h-[60px] rounded-[16px] bg-accent text-white text-[20px] font-bold
+          className="w-full h-[48px] rounded-[16px] bg-accent text-white text-[16px] font-bold
                      cursor-pointer disabled:opacity-40 active:scale-[0.99] transition-transform"
         >
           {busy ? "저장 중…" : "네, 맞아요"}
         </button>
-        <button onClick={onRedo} className="w-full h-[46px] text-[17px] text-muted cursor-pointer">
+        <button onClick={onRedo} className="w-full h-[37px] text-[14px] text-muted cursor-pointer">
           다시 알려줄게요
         </button>
       </div>
@@ -258,26 +258,26 @@ export default function Onboarding() {
 
   if (step === "intro") {
     return (
-      <div className="h-screen flex flex-col overflow-hidden max-w-[560px] mx-auto px-[24px]">
+      <div className="h-screen flex flex-col overflow-hidden max-w-[448px] mx-auto px-[19px]">
         <div className="flex-1 min-h-0 flex flex-col justify-center">
-          <div className="text-[19px] font-bold tracking-[0.2em] text-accent mb-[20px]">
+          <div className="text-[15px] font-bold tracking-[0.2em] text-accent mb-[16px]">
             DONGHAENG
           </div>
-          <h1 className="text-[34px] font-bold leading-[1.32] [text-wrap:balance]">
+          <h1 className="text-[27px] font-bold leading-[1.32] [text-wrap:balance]">
             어르신에 대해<br />몇 가지만 여쭤볼게요
           </h1>
-          <p className="text-[18px] text-muted mt-[16px] leading-[1.6]">
+          <p className="text-[14px] text-muted mt-[13px] leading-[1.6]">
             {greeting
               ? "3분이면 됩니다. 모르시는 건 '모르겠어요'를 고르셔도 되고, 언제든 그만두셔도 됩니다."
               : "준비 중…"}
           </p>
         </div>
-        <div className="flex-none pb-[28px]">
-          {error && <p role="alert" className="text-warn text-[17px] mb-[12px]">{error}</p>}
+        <div className="flex-none pb-[22px]">
+          {error && <p role="alert" className="text-warn text-[14px] mb-[10px]">{error}</p>}
           <button
             onClick={() => setStep("question")}
             disabled={!current}
-            className="w-full h-[60px] rounded-[16px] bg-accent text-white text-[20px] font-bold
+            className="w-full h-[48px] rounded-[16px] bg-accent text-white text-[16px] font-bold
                        cursor-pointer disabled:opacity-40 active:scale-[0.99] transition-transform"
           >
             시작하기
@@ -298,22 +298,22 @@ export default function Onboarding() {
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <ProgressBar value={total ? filled / total : 0} />
-      <div className="flex-1 min-h-0 flex flex-col overflow-hidden max-w-[560px] w-full mx-auto px-[24px]">
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden max-w-[448px] w-full mx-auto px-[19px]">
         <TopBar onBack={back} onQuit={quit} canGoBack={history.length > 0} />
 
         {/* 질문과 선택지를 한 덩어리로 묶어 화면 가운데에 둔다.
             위에 붙이면 선택지 아래로 빈 공간이 크게 남아 화면이 비어 보인다. */}
         <div className="flex-1 min-h-0 flex flex-col justify-center overflow-hidden">
-          <div className="flex-none pb-[28px]">
-            <h1 className="text-[30px] font-bold leading-[1.35] [text-wrap:balance]">
+          <div className="flex-none pb-[22px]">
+            <h1 className="text-[24px] font-bold leading-[1.35] [text-wrap:balance]">
               {current?.question}
             </h1>
             {current?.hint && (
-              <p className="text-[17px] text-muted mt-[10px]">{current.hint}</p>
+              <p className="text-[14px] text-muted mt-[8px]">{current.hint}</p>
             )}
           </div>
 
-          <div className="flex-none flex flex-col gap-[10px]">
+          <div className="flex-none flex flex-col gap-[8px]">
           {showText && (
             <input
               ref={inputRef}
@@ -322,8 +322,8 @@ export default function Onboarding() {
               onKeyDown={(e) => { if (e.key === "Enter") send(); }}
               disabled={busy}
               placeholder="여기에 입력해 주세요"
-              className="w-full h-[64px] flex-none px-[20px] rounded-[16px] border-2 border-line
-                         bg-surface text-[22px] focus:border-accent placeholder:text-muted/50"
+              className="w-full h-[51px] flex-none px-[16px] rounded-[16px] border-2 border-line
+                         bg-surface text-[18px] focus:border-accent placeholder:text-muted/50"
             />
           )}
           {options.map((opt) => (
@@ -338,13 +338,13 @@ export default function Onboarding() {
           </div>
         </div>
 
-        <div className="flex-none pt-[12px] pb-[28px]">
-          {error && <p role="alert" className="text-warn text-[17px] mb-[10px]">{error}</p>}
+        <div className="flex-none pt-[10px] pb-[22px]">
+          {error && <p role="alert" className="text-warn text-[14px] mb-[8px]">{error}</p>}
           {showText && (
             <button
               onClick={() => send()}
               disabled={busy || !text.trim()}
-              className="w-full h-[60px] rounded-[16px] bg-accent text-white text-[20px] font-bold
+              className="w-full h-[48px] rounded-[16px] bg-accent text-white text-[16px] font-bold
                          cursor-pointer disabled:opacity-30 active:scale-[0.99] transition-transform"
             >
               다음

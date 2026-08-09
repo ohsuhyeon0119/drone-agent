@@ -81,16 +81,16 @@ export default function ActionDetail() {
 
   return (
     <>
-      <nav className="text-[18px] text-muted mb-4">
+      <nav className="text-[14px] text-muted mb-4">
         <Link to="/actions" className="hover:text-accent">행동</Link>
         <span className="mx-2">›</span>
         <span className="text-ink">{isNew ? "새 행동" : action.name}</span>
       </nav>
 
       <header className="flex flex-wrap items-center justify-between gap-4 mb-8">
-        <h1 className="text-[34px] font-bold">{isNew ? "행동 추가" : action.name}</h1>
+        <h1 className="text-[27px] font-bold">{isNew ? "행동 추가" : action.name}</h1>
         {!isNew && (
-          <span className="inline-block text-[16px] font-bold bg-accentsoft text-accent rounded-full px-4 py-2">
+          <span className="inline-block text-[13px] font-bold bg-accentsoft text-accent rounded-full px-4 py-2">
             {KIND_LABEL[action.kind] || action.kind}
           </span>
         )}
@@ -124,7 +124,7 @@ export default function ActionDetail() {
             {params.map((p, i) => (
               <div key={i} className="flex flex-wrap gap-2">
                 <input
-                  className={`${inputCls} flex-1 min-w-[150px]`}
+                  className={`${inputCls} flex-1 min-w-[120px]`}
                   placeholder="이름 (예: 전달 내용)"
                   value={p.name}
                   onChange={(e) => {
@@ -134,7 +134,7 @@ export default function ActionDetail() {
                   }}
                 />
                 <input
-                  className={`${inputCls} flex-1 min-w-[150px]`}
+                  className={`${inputCls} flex-1 min-w-[120px]`}
                   placeholder="설명"
                   value={p.desc}
                   onChange={(e) => {
@@ -156,7 +156,7 @@ export default function ActionDetail() {
                 )}
               </div>
             ))}
-            <Button variant="ghost" className="self-start h-12 text-[16px]"
+            <Button variant="ghost" className="self-start h-12 text-[13px]"
                     onClick={() => setParams([...params, { name: "", desc: "" }])}>
               + 정보 항목 추가
             </Button>
@@ -177,7 +177,7 @@ export default function ActionDetail() {
                       key={c.id}
                       onClick={() => toggleActionContact(id, c.id)}
                       aria-pressed={on}
-                      className={`flex items-center gap-2.5 h-14 px-5 rounded-full border text-[16px] cursor-pointer transition-colors duration-150
+                      className={`flex items-center gap-2.5 h-14 px-5 rounded-full border text-[13px] cursor-pointer transition-colors duration-150
                         ${on ? "border-accent bg-accentsoft text-accent font-bold"
                              : "border-line bg-surface text-muted hover:border-accent"}`}
                     >
@@ -202,7 +202,7 @@ export default function ActionDetail() {
                   <input className={inputCls} placeholder="010-0000-0000" aria-label="전화번호" inputMode="tel"
                     value={cForm.phone} onChange={(e) => setCForm({ ...cForm, phone: e.target.value })} />
                 </div>
-                {cError && <p role="alert" className="text-warn text-[16px] mb-3">{cError}</p>}
+                {cError && <p role="alert" className="text-warn text-[13px] mb-3">{cError}</p>}
                 <div className="flex gap-2">
                   <Button variant="primary" type="submit"
                           disabled={!cForm.name.trim() || !cForm.phone.trim()}>
@@ -231,7 +231,7 @@ export default function ActionDetail() {
             </select>
           </Field>
         ) : (
-          <p className="text-muted text-[16px] mb-5">
+          <p className="text-muted text-[13px] mb-5">
             실행 방식({KIND_LABEL[form.kind]})은 바꿀 수 없습니다.
           </p>
         )}
@@ -250,16 +250,16 @@ export default function ActionDetail() {
 
       {!isNew && (
         <section className="bg-surface border border-line rounded-(--radius-card) px-8 py-7 mb-8">
-          <h2 className="text-[21px] font-bold mb-2">이 행동을 쓰는 시나리오</h2>
+          <h2 className="text-[17px] font-bold mb-2">이 행동을 쓰는 시나리오</h2>
           {usedBy.length === 0 ? (
-            <p className="text-muted text-[16px]">
+            <p className="text-muted text-[13px]">
               아직 어느 시나리오에도 연결되어 있지 않습니다. 시나리오의 “감지 시 실행할 행동”에서 연결하세요.
             </p>
           ) : (
             <div className="flex flex-wrap gap-2.5">
               {usedBy.map((s) => (
                 <Link key={s.id} to={`/scenarios/${s.id}`}
-                      className="inline-block text-[16px] font-bold bg-accentsoft text-accent rounded-full px-5 py-2.5 hover:underline">
+                      className="inline-block text-[13px] font-bold bg-accentsoft text-accent rounded-full px-5 py-2.5 hover:underline">
                   {s.name}
                 </Link>
               ))}
@@ -278,7 +278,7 @@ export default function ActionDetail() {
           {!isNew && <Button variant="danger" onClick={remove}>이 행동 삭제</Button>}
         </div>
       </div>
-      <p className="text-muted text-[15px] mt-3">
+      <p className="text-muted text-[12px] mt-3">
         수정한 내용은 배포해야 동행이에게 적용됩니다.
       </p>
     </>

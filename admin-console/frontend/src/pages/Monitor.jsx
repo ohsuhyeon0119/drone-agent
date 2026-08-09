@@ -146,8 +146,8 @@ export default function Monitor() {
     <>
       <header className="flex flex-wrap items-center justify-between gap-4 mb-7">
         <div>
-          <h1 className="text-[34px] font-bold">모니터링</h1>
-          <p className="text-muted mt-2 text-[19px]">
+          <h1 className="text-[27px] font-bold">모니터링</h1>
+          <p className="text-muted mt-2 text-[15px]">
             카메라가 보고 있는 화면과 그 사이 일어난 일입니다.
           </p>
         </div>
@@ -171,14 +171,14 @@ export default function Monitor() {
             {source === "phone" && (frameUrl ? (
               <img src={frameUrl} alt="카메라 화면" className="w-full h-full object-contain" />
             ) : (
-              <p className="text-white/55 text-[18px] text-center px-8">
+              <p className="text-white/55 text-[14px] text-center px-8">
                 {status.connected
                   ? "영상이 아직 들어오지 않았습니다."
                   : "휴대폰이 연결되면 여기에 화면이 보입니다."}
               </p>
             ))}
             {source === "laptop" && laptop.state !== "live" && (
-              <p className="absolute text-white/55 text-[18px] text-center px-8">
+              <p className="absolute text-white/55 text-[14px] text-center px-8">
                 {laptop.state === "starting" ? "카메라를 켜는 중…" : "‘시작’을 누르면 이 화면이 동행이에게 전달됩니다."}
               </p>
             )}
@@ -186,23 +186,23 @@ export default function Monitor() {
         </section>
 
         <section className="bg-surface border border-line rounded-(--radius-card) flex flex-col
-                            h-[clamp(420px,62vh,760px)]">
+                            h-[clamp(336px,52vh,608px)]">
           <div className="flex-none flex items-baseline justify-between px-6 py-4 border-b border-line">
-            <h2 className="text-[21px] font-bold">로그</h2>
-            <span className="text-[14px] text-muted tabular-nums">{log.length}건</span>
+            <h2 className="text-[17px] font-bold">로그</h2>
+            <span className="text-[11px] text-muted tabular-nums">{log.length}건</span>
           </div>
           <ol className="flex-1 min-h-0 overflow-y-auto px-6 py-4 flex flex-col gap-3">
             {log.length === 0 && (
-              <li className="text-muted text-[16px] py-6 text-center">아직 기록이 없습니다.</li>
+              <li className="text-muted text-[13px] py-6 text-center">아직 기록이 없습니다.</li>
             )}
             {log.map((row) => (
               <li key={row.id} className={`border-l-[3px] pl-4 ${TONE[row.tone] || TONE.info}`}>
                 <div className="flex items-baseline gap-3">
-                  <span className="font-bold text-[16px]">{row.title}</span>
-                  <span className="text-[14px] text-muted tabular-nums ml-auto">{row.ts}</span>
+                  <span className="font-bold text-[13px]">{row.title}</span>
+                  <span className="text-[11px] text-muted tabular-nums ml-auto">{row.ts}</span>
                 </div>
                 {row.body && (
-                  <p className="text-[15px] leading-relaxed break-words">{row.body}</p>
+                  <p className="text-[12px] leading-relaxed break-words">{row.body}</p>
                 )}
               </li>
             ))}
@@ -222,14 +222,14 @@ function SourcePicker({ source, onChange, laptop }) {
   return (
     <section className="mb-6 bg-surface border border-line rounded-(--radius-card) px-6 py-5">
       <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
-        <span className="text-[18px] font-bold">카메라</span>
+        <span className="text-[14px] font-bold">카메라</span>
         <div className="flex flex-wrap gap-3">
           {SOURCES.map((s, i) => (
             <button
               key={s.key}
               onClick={() => onChange(s.key)}
               title={s.desc}
-              className={`px-6 py-3 rounded-full text-[17px] font-bold cursor-pointer border-2
+              className={`px-6 py-3 rounded-full text-[14px] font-bold cursor-pointer border-2
                 transition-colors duration-150
                 ${source === s.key
                   ? "border-accent bg-accentsoft text-accent"
@@ -242,11 +242,14 @@ function SourcePicker({ source, onChange, laptop }) {
 
         {source === "laptop" && (
           <div className="flex items-center gap-4 ml-auto">
+            {laptop.state === "live" && (
+              <MicMeter on={laptop.micOn} level={laptop.micLevel} />
+            )}
             {laptop.state === "live" ? (
               <button
                 onClick={laptop.stop}
                 className="h-14 px-6 rounded-(--radius-ctl) border border-warn/40 text-warn bg-surface
-                           hover:bg-warnsoft text-[18px] font-bold cursor-pointer"
+                           hover:bg-warnsoft text-[14px] font-bold cursor-pointer"
               >
                 중지
               </button>
@@ -254,7 +257,7 @@ function SourcePicker({ source, onChange, laptop }) {
               <button
                 onClick={laptop.start}
                 disabled={laptop.state === "starting"}
-                className="h-14 px-6 rounded-(--radius-ctl) bg-accent text-white text-[18px] font-bold
+                className="h-14 px-6 rounded-(--radius-ctl) bg-accent text-white text-[14px] font-bold
                            cursor-pointer disabled:opacity-40"
               >
                 {laptop.state === "starting" ? "여는 중…" : "시작"}
@@ -264,15 +267,38 @@ function SourcePicker({ source, onChange, laptop }) {
         )}
       </div>
 
-      <p className="text-muted text-[16px] mt-3">
+      <p className="text-muted text-[13px] mt-3">
         {source === "laptop"
           ? "이 컴퓨터의 카메라·마이크가 동행이에게 연결됩니다. 말을 걸면 대답하고, 낙상·복약 감지도 함께 돕니다."
           : "휴대폰이 보내는 화면을 지켜보기만 합니다. 이 화면에서 말을 걸 수는 없습니다."}
       </p>
       {laptop.error && source === "laptop" && (
-        <p role="alert" className="text-warn text-[16px] mt-2">{laptop.error}</p>
+        <p role="alert" className="text-warn text-[13px] mt-2">{laptop.error}</p>
       )}
     </section>
+  );
+}
+
+/* 소리는 보이지 않는다. 입력 크기를 그려야 "마이크가 안 되는 것"과
+   "그 뒤에서 막힌 것"을 쓰는 사람이 구별할 수 있다. */
+function MicMeter({ on, level }) {
+  if (!on) {
+    return <span className="text-[13px] text-warn font-bold">마이크 꺼짐</span>;
+  }
+  return (
+    <span className="flex items-center gap-[6px]" title="마이크 입력">
+      <span className="text-[13px] text-muted">마이크</span>
+      <span className="flex items-end gap-[2px] h-[16px]">
+        {[0.15, 0.35, 0.55, 0.75, 0.95].map((t, i) => (
+          <span
+            key={i}
+            className={`w-[3px] rounded-full transition-colors duration-75
+              ${level >= t ? "bg-accent" : "bg-line"}`}
+            style={{ height: `${6 + i * 2.5}px` }}
+          />
+        ))}
+      </span>
+    </span>
   );
 }
 
@@ -285,7 +311,7 @@ function StatusPill({ connected, link }) {
       ? { label: "기기 연결됨", cls: "bg-accentsoft text-accent" }
       : { label: "기기 대기 중", cls: "bg-bg text-muted border border-line" };
   return (
-    <span className={`inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full text-[16px] font-bold ${state.cls}`}>
+    <span className={`inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full text-[13px] font-bold ${state.cls}`}>
       <span className={`w-2.5 h-2.5 rounded-full ${link === "open" && connected ? "bg-accent" : "bg-current opacity-50"}`} />
       {state.label}
     </span>
