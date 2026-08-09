@@ -39,7 +39,8 @@ export default function ActionDetail() {
   }
 
   /* 이 행동을 쓰는 시나리오 — 수정 화면에서도 관계가 보이게 한다 */
-  const usedBy = draft.scenarios.filter((s) => s.onDetect === id);
+  const usedBy = draft.scenarios.filter((s) =>
+    (s.instructions || []).some((x) => x.action === id));
   const tagged = action?.notifyContactIds || [];
 
   const submitContact = (e) => {
@@ -267,16 +268,19 @@ export default function ActionDetail() {
         </section>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
         <Button variant="primary" onClick={save}
                 disabled={!form.name.trim() || !form.description.trim()}>
-          {isNew ? "추가하기" : "저장하기"}
+          {isNew ? "추가하기" : "수정 완료"}
         </Button>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={() => navigate("/actions")}>취소</Button>
           {!isNew && <Button variant="danger" onClick={remove}>이 행동 삭제</Button>}
         </div>
       </div>
+      <p className="text-muted text-[20px] mt-3">
+        수정한 내용은 배포해야 동행이에게 적용됩니다.
+      </p>
     </>
   );
 }

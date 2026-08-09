@@ -308,14 +308,19 @@ async def ws_unified(websocket: WebSocket):
     # 다음 대화부터 반영되게 하기 위함. Gemini Live는 tool을 연결 시점에만
     # 고정할 수 있어서, 이미 열린 세션에는 반영할 수 없다.
     live_config = admin_store.get_live()["config"]
-    actions = live_config.get("actions", [])
+    all_actions = live_config.get("actions", [])
     contacts = live_config.get("contacts", [])
-    # 시나리오에서 태깅한 연락 대상을 행동별로 모은다 (누구에게 연락할지의 근거)
-    contact_ids_by_action: dict[str, list[str]] = {}
-    for s in live_config.get("scenarios", []):
-        action_id = s.get("action")
-        if action_id:
-            contact_ids_by_action.setdefault(action_id, []).extend(s.get("notify_contact_ids") or [])
+
+    # 켜져 있는 시나리오의 지침에 붙은 행동만 이 세션에 등록한다 — 쓰지도 않을
+    # 도구까지 전부 넘기면 모델이 엉뚱한 것을 고를 여지가 생긴다.
+    used_action_ids = {
+        x["action"]
+        for sc in live_config.get("scenarios", [])
+        if sc.get("enabled", True)
+        for x in admin_store.normalize_instructions(sc.get("instructions"))
+        if x.get("action")
+    }
+    actions = [a for a in all_actions if a.get("id") in used_action_ids]
 
     unified_persona = build_unified_persona(scenarios, actions)
 
@@ -335,16 +340,15 @@ async def ws_unified(websocket: WebSocket):
 
     tool_context = {
         "contacts": contacts,
-        # 행동 자체에 지정한 대상이 우선, 없으면 시나리오에 지정한 대상
+        # 연락 대상은 행동에만 둔다 (같은 값이 두 곳에 있으면 어느 쪽이 맞는지 모른다)
         "contact_ids_by_action_own": {
             a["id"]: a.get("notify_contact_ids") or [] for a in actions if a.get("id")
         },
-        "contact_ids_by_action": contact_ids_by_action,
         "on_event": on_tool_event,
     }
     tools = build_tools(actions)
-    logger.info(f"[/unified] 등록된 행동: {[a.get('id') for a in actions]} / "
-                f"연락처 {len(contacts)}명")
+    logger.info(f"[/unified] 지침이 쓰는 행동만 등록: {[a.get('id') for a in actions]} "
+                f"(전체 {len(all_actions)}개 중) / 연락처 {len(contacts)}명")
 
     gemini_client = GeminiLive(
         api_key=GEMINI_API_KEY,

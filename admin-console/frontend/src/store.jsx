@@ -11,12 +11,11 @@ const SEED = {
       detectPrompt: "이 이미지를 보고 사람이 엎드려 있거나 넘어져 있는지 감지하라.",
       cooldown: 10,
       instructions: [
-        "쓰러짐이 감지되면 즉시 걱정스러운 톤으로 “괜찮으세요?”라고 물어봅니다.",
-        "사용자가 괜찮지 않다고 답하거나 응답이 없으면 보호자에게 알립니다.",
-        "사용자가 명확히 괜찮다고 답하면 신고하지 않고 안심시키는 말로 마무리합니다.",
+        { text: "쓰러짐이 감지되면 즉시 걱정스러운 톤으로 “괜찮으세요?”라고 물어봅니다." },
+        { text: "괜찮지 않다고 답하시거나 응답이 없으면 보호자에게 알립니다.",
+          action: "notify_caregiver" },
+        { text: "명확히 괜찮다고 답하시면 알리지 않고 안심시키는 말로 마무리합니다." },
       ],
-      onDetect: "notify_caregiver",
-      notifyContactIds: [],
     },
     {
       id: "medication",
@@ -27,12 +26,12 @@ const SEED = {
         "입 근처로 가져가 약을 복용하는 동작을 하고 있는지 감지하라.",
       cooldown: 15,
       instructions: [
-        "복약 시간이 되면 먼저 다정하게 말을 걸어 복용을 권합니다.",
-        "약을 복용하는 모습이 확인되면 따뜻하게 칭찬하고 기록을 남깁니다.",
-        "아직 안 드셨다고 하면 부드럽게 다시 권유하고 재차 확인합니다.",
+        { text: "복약 시간이 되면 먼저 다정하게 말을 걸어 복용을 권합니다." },
+        { text: "약을 복용하는 모습이 확인되면 따뜻하게 칭찬합니다." },
+        { text: "아직 안 드셨다고 하시면 부드럽게 다시 권유하고 재차 확인합니다." },
+        { text: "어르신이 약을 드셨다고 말씀하시면 기록을 남깁니다.",
+          action: "record_medication" },
       ],
-      onDetect: "record_log",
-      notifyContactIds: [],
     },
     {
       id: "task",
@@ -41,11 +40,9 @@ const SEED = {
       detectPrompt: "",
       cooldown: 10,
       instructions: [
-        "화면이나 눈앞의 물건에 대해 물어보면 쉬운 말로 한 단계씩 설명합니다.",
-        "어려운 용어는 피하고, 필요하면 되물어 정확히 확인한 뒤 안내합니다.",
+        { text: "화면이나 눈앞의 물건에 대해 물어보면 쉬운 말로 한 단계씩 설명합니다." },
+        { text: "어려운 용어는 피하고, 필요하면 되물어 정확히 확인한 뒤 안내합니다." },
       ],
-      onDetect: null,
-      notifyContactIds: [],
     },
   ],
   actions: [
@@ -62,20 +59,11 @@ const SEED = {
       notifyContactIds: [],
     },
     {
-      id: "record_log",
-      name: "기록 남기기",
-      description: "복약 확인 등 일상 기록을 남길 때",
+      id: "record_medication",
+      name: "복약 기록",
+      description: "어르신이 약을 드셨다고 말씀하셨을 때 기록을 남깁니다. 카메라로 이미 확인된 경우에는 호출하지 않습니다.",
       params: [{ name: "기록 내용", type: "글", desc: "남길 내용" }],
       kind: "builtin",
-    },
-    {
-      id: "report_119",
-      name: "119 신고 기록",
-      description: "응급 상황으로 판단되어 신고가 필요할 때",
-      params: [{ name: "상황 설명", type: "글", desc: "신고에 포함할 설명" }],
-      kind: "builtin",
-      needsContacts: true,
-      notifyContactIds: [],
     },
   ],
   contacts: [],
@@ -91,13 +79,28 @@ function clone(x) {
 /* 저장된 설정에 시드의 새 필드를 채워 넣는다.
    화면에 항목을 추가할 때마다 예전에 저장된 브라우저에서는 그 항목이 통째로
    사라져 보이는 문제를 막기 위함 (사용자가 입력한 값은 그대로 둔다). */
+function normalizeInstructions(list) {
+  return (list || []).map((x) =>
+    typeof x === "string" ? { text: x, action: null } : { text: x.text, action: x.action || null },
+  );
+}
+
 function withSeedDefaults(config) {
   if (!config || typeof config !== "object") return clone(SEED);
   const merged = { ...clone(SEED), ...config };
   const seedScen = Object.fromEntries(SEED.scenarios.map((s) => [s.id, s]));
-  merged.scenarios = (config.scenarios || SEED.scenarios).map((s) => ({
-    ...(seedScen[s.id] || {}), ...s,
-  }));
+  merged.scenarios = (config.scenarios || SEED.scenarios).map((s) => {
+    const m = { ...(seedScen[s.id] || {}), ...s };
+    m.instructions = normalizeInstructions(m.instructions);
+    // 예전에는 행동이 시나리오에 붙어 있었다 — 남아 있으면 지침 쪽으로 옮긴다
+    if (m.onDetect && !m.instructions.some((x) => x.action)) {
+      const last = m.instructions[m.instructions.length - 1];
+      if (last) last.action = m.onDetect;
+    }
+    delete m.onDetect;
+    delete m.notifyContactIds;
+    return m;
+  });
   const seedAct = Object.fromEntries(SEED.actions.map((a) => [a.id, a]));
   merged.actions = (config.actions || SEED.actions).map((a) => ({
     ...(seedAct[a.id] || {}), ...a,
@@ -135,22 +138,20 @@ export function computeChanges(draft, liveConfig) {
     const ls = liveScen[s.id];
     if (!ls) { changes.push(`시나리오 추가됨 — ${s.name}`); continue; }
     if (s.enabled !== ls.enabled) changes.push(`${s.name} ${s.enabled ? "켜짐" : "꺼짐"}`);
-    for (const ins of s.instructions)
-      if (!ls.instructions.includes(ins)) changes.push(`지침 추가됨 (${s.name}) — “${ins}”`);
-    for (const ins of ls.instructions)
-      if (!s.instructions.includes(ins)) changes.push(`지침 삭제됨 (${s.name}) — “${ins}”`);
-    if ((s.onDetect || null) !== (ls.onDetect || null))
-      changes.push(`${s.name}의 감지 시 행동이 변경됨`);
+    const actName = (aid) => (draft.actions.find((a) => a.id === aid) || {}).name || aid;
+    const dIns = Object.fromEntries((s.instructions || []).map((x) => [x.text, x]));
+    const lIns = Object.fromEntries((ls.instructions || []).map((x) => [x.text, x]));
+    for (const [text, x] of Object.entries(dIns)) {
+      if (!(text in lIns)) changes.push(`지침 추가됨 (${s.name}) — “${text}”`);
+      else if ((x.action || null) !== (lIns[text].action || null))
+        changes.push(`지침의 행동 변경됨 (${s.name}) — “${text}” → ${x.action ? actName(x.action) : "없음"}`);
+    }
+    for (const text of Object.keys(lIns))
+      if (!(text in dIns)) changes.push(`지침 삭제됨 (${s.name}) — “${text}”`);
     if ((s.detectPrompt || "") !== (ls.detectPrompt || ""))
       changes.push(`${s.name} 감지 기준 변경됨`);
     if (Number(s.cooldown) !== Number(ls.cooldown))
       changes.push(`${s.name} 재판정 간격 ${s.cooldown}초로 변경됨`);
-    const names = (ids) => (ids || []).map((id) =>
-      (draft.contacts.find((c) => c.id === id) || liveConfig.contacts.find((c) => c.id === id) || {}).name || "?");
-    const a = names(s.notifyContactIds).join(", ");
-    const bb = names(ls.notifyContactIds).join(", ");
-    if (a !== bb)
-      changes.push(`${s.name} 연락 대상 변경됨 — ${a || "없음"}`);
   }
   const liveAct = Object.fromEntries(liveConfig.actions.map((a) => [a.id, a]));
   const cname = (ids) => (ids || []).map((id) =>
@@ -206,18 +207,19 @@ export function StoreProvider({ children }) {
 
     toggleScenario: (id, enabled) =>
       update((d) => { d.scenarios.find((s) => s.id === id).enabled = enabled; }),
-    addInstruction: (id, text) =>
-      update((d) => { d.scenarios.find((s) => s.id === id).instructions.push(text); }),
+    addInstruction: (id, text, action = null) =>
+      update((d) => { d.scenarios.find((s) => s.id === id).instructions.push({ text, action }); }),
     removeInstruction: (id, idx) =>
       update((d) => { d.scenarios.find((s) => s.id === id).instructions.splice(idx, 1); }),
     updateInstruction: (id, idx, text) =>
-      update((d) => { d.scenarios.find((s) => s.id === id).instructions[idx] = text; }),
+      update((d) => { d.scenarios.find((s) => s.id === id).instructions[idx].text = text; }),
+    /* 행동은 시나리오가 아니라 개별 지침에 붙는다 — 모든 지침에 붙을 필요는 없다 */
+    setInstructionAction: (id, idx, actionId) =>
+      update((d) => { d.scenarios.find((s) => s.id === id).instructions[idx].action = actionId || null; }),
     setDetectPrompt: (id, text) =>
       update((d) => { d.scenarios.find((s) => s.id === id).detectPrompt = text; }),
     setCooldown: (id, seconds) =>
       update((d) => { d.scenarios.find((s) => s.id === id).cooldown = seconds; }),
-    setOnDetect: (id, actionId) =>
-      update((d) => { d.scenarios.find((s) => s.id === id).onDetect = actionId || null; }),
 
     addAction: (action) =>
       update((d) => { d.actions.push({ ...action, id: `custom_${Date.now()}`, kind: action.kind || "builtin" }); }),
@@ -247,33 +249,16 @@ export function StoreProvider({ children }) {
     removeAction: (id) =>
       update((d) => {
         d.actions = d.actions.filter((a) => a.id !== id);
-        for (const s of d.scenarios) if (s.onDetect === id) s.onDetect = null;
+        // 이 행동을 쓰던 지침의 연결도 함께 끊는다
+        for (const s of d.scenarios)
+          for (const x of s.instructions) if (x.action === id) x.action = null;
       }),
 
     addContact: (c) =>
       update((d) => { d.contacts.push({ ...c, id: `ct_${Date.now()}` }); }),
-    /* 연락처를 새로 만들면서 곧바로 해당 시나리오의 연락 대상으로 태깅 */
-    addContactAndTag: (scenarioId, c) =>
-      update((d) => {
-        const id = `ct_${Date.now()}`;
-        d.contacts.push({ ...c, id });
-        const sc = d.scenarios.find((s) => s.id === scenarioId);
-        if (sc) sc.notifyContactIds = [...(sc.notifyContactIds || []), id];
-      }),
-    toggleScenarioContact: (scenarioId, contactId) =>
-      update((d) => {
-        const sc = d.scenarios.find((s) => s.id === scenarioId);
-        if (!sc) return;
-        const cur = sc.notifyContactIds || [];
-        sc.notifyContactIds = cur.includes(contactId)
-          ? cur.filter((x) => x !== contactId)
-          : [...cur, contactId];
-      }),
     removeContact: (id) =>
       update((d) => {
         d.contacts = d.contacts.filter((c) => c.id !== id);
-        for (const s of d.scenarios)
-          s.notifyContactIds = (s.notifyContactIds || []).filter((x) => x !== id);
         for (const a of d.actions)
           if (a.notifyContactIds) a.notifyContactIds = a.notifyContactIds.filter((x) => x !== id);
       }),

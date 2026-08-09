@@ -13,11 +13,18 @@
 
 설정 번들 스키마:
   {
-    "scenarios": [{key, name, enabled, detect_prompt, cooldown, nudge_template,
-                   instructions[], action, notify_contact_ids[]}],
-    "actions":   [{id, name, description, params[], kind, url?, needs_contacts}],
+    "scenarios": [{key, name, enabled, detect_prompt, cooldown, min_confidence,
+                   nudge_template, instructions[]}],
+    "actions":   [{id, name, description, params[], kind, url?, needs_contacts,
+                   notify_contact_ids[]}],
     "contacts":  [{id, name, relation, phone}]
   }
+
+지침(instructions)은 {text, action?} 형태다. 행동은 시나리오가 아니라 **개별
+지침**에 붙는다 — "낙상 시나리오가 알림을 보낸다"가 아니라 "응답이 없을 때라는
+지침이 알림을 보낸다"가 실제 구조이기 때문이다. 모든 지침에 행동이 붙을 필요는
+없다(대부분은 말하는 방식에 대한 것이다). 연락 대상은 행동에만 둔다 — 같은 값이
+두 곳에 있으면 어느 쪽이 맞는지 알 수 없어진다.
 """
 
 from __future__ import annotations
@@ -111,6 +118,21 @@ CREATE INDEX IF NOT EXISTS idx_events_agent_ts ON events(agent_id, ts);
 """
 
 
+def normalize_instructions(raw) -> list[dict]:
+    """지침을 {text, action} 형태로 맞춘다.
+
+    예전 설정은 지침이 문자열 리스트였다. 저장된 값을 그대로 두면 화면과 페르소나
+    양쪽에서 형태를 매번 따져야 하므로, 읽는 지점에서 한 번 정규화한다.
+    """
+    out: list[dict] = []
+    for item in raw or []:
+        if isinstance(item, str):
+            out.append({"text": item, "action": None})
+        elif isinstance(item, dict) and item.get("text"):
+            out.append({"text": item["text"], "action": item.get("action") or None})
+    return out
+
+
 def _now() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
@@ -163,9 +185,7 @@ def _bundle_from_yaml() -> dict:
             "cooldown": float(s.get("cooldown", 10.0)),
             "min_confidence": float(s.get("min_confidence", 0.7)),
             "nudge_template": s.get("nudge_template", ""),
-            "instructions": list(s.get("instructions", [])),
-            "action": s.get("action"),
-            "notify_contact_ids": [],
+            "instructions": normalize_instructions(s.get("instructions")),
             "target_event": s.get("target_event", "event"),
         })
     return {
@@ -289,18 +309,14 @@ def validate(bundle: dict) -> list[str]:
                 errors.append(f"{name}: 재판정 간격은 1~600초 사이여야 합니다.")
         except (TypeError, ValueError):
             errors.append(f"{name}: 재판정 간격이 숫자가 아닙니다.")
-        ins = s.get("instructions")
-        if not isinstance(ins, list) or not ins:
+        ins = normalize_instructions(s.get("instructions"))
+        if not ins:
             errors.append(f"{name}: 지침이 하나도 없습니다.")
-        elif any(not str(x).strip() for x in ins):
+        if any(not str(x["text"]).strip() for x in ins):
             errors.append(f"{name}: 빈 지침이 있습니다.")
-        act = s.get("action")
-        if act and act not in action_ids:
-            errors.append(f"{name}: 연결된 행동 '{act}'을 찾을 수 없습니다.")
-        for cid in s.get("notify_contact_ids") or []:
-            if cid not in contact_ids:
-                errors.append(f"{name}: 연락 대상 중 삭제된 연락처가 있습니다.")
-                break
+        for x in ins:
+            if x.get("action") and x["action"] not in action_ids:
+                errors.append(f"{name}: 지침에 연결된 행동 '{x['action']}'을 찾을 수 없습니다.")
     return errors
 
 
@@ -366,6 +382,13 @@ def save_draft(bundle: dict, by: str | None = None, agent_id: int = DEFAULT_AGEN
 def diff(draft: dict, live: dict) -> list[dict]:
     out: list[dict] = []
 
+    def action_name(aid):
+        if not aid:
+            return None
+        pool = {a["id"]: a for a in (live.get("actions") or [])}
+        pool.update({a["id"]: a for a in (draft.get("actions") or [])})
+        return pool.get(aid, {}).get("name", aid)
+
     def contact_names(ids):
         pool = {c["id"]: c for c in (draft.get("contacts") or [])}
         pool.update({c["id"]: c for c in (live.get("contacts") or [])})
@@ -382,12 +405,20 @@ def diff(draft: dict, live: dict) -> list[dict]:
         if bool(s.get("enabled", True)) != bool(ls.get("enabled", True)):
             out.append({"text": f"{s['name']} {'켜짐' if s.get('enabled', True) else '꺼짐'}",
                         "tier": "instant"})
-        for ins in s.get("instructions", []):
-            if ins not in ls.get("instructions", []):
-                out.append({"text": f"지침 추가됨 ({s['name']}) — “{ins}”", "tier": "next"})
-        for ins in ls.get("instructions", []):
-            if ins not in s.get("instructions", []):
-                out.append({"text": f"지침 삭제됨 ({s['name']}) — “{ins}”", "tier": "next"})
+        d_ins = normalize_instructions(s.get("instructions"))
+        l_ins = normalize_instructions(ls.get("instructions"))
+        d_texts = {x["text"]: x for x in d_ins}
+        l_texts = {x["text"]: x for x in l_ins}
+        for text, x in d_texts.items():
+            if text not in l_texts:
+                out.append({"text": f"지침 추가됨 ({s['name']}) — “{text}”", "tier": "next"})
+            elif x.get("action") != l_texts[text].get("action"):
+                label = action_name(x.get("action")) or "없음"
+                out.append({"text": f"지침의 행동 변경됨 ({s['name']}) — “{text}” → {label}",
+                            "tier": "next"})
+        for text in l_texts:
+            if text not in d_texts:
+                out.append({"text": f"지침 삭제됨 ({s['name']}) — “{text}”", "tier": "next"})
         if s.get("detect_prompt") != ls.get("detect_prompt"):
             out.append({"text": f"{s['name']} 감지 기준 변경됨", "tier": "instant"})
         if float(s.get("cooldown", 0)) != float(ls.get("cooldown", 0)):
@@ -395,12 +426,6 @@ def diff(draft: dict, live: dict) -> list[dict]:
                         "tier": "instant"})
         if s.get("nudge_template") != ls.get("nudge_template"):
             out.append({"text": f"{s['name']} 감지 시 안내 문구 변경됨", "tier": "instant"})
-        if (s.get("action") or None) != (ls.get("action") or None):
-            out.append({"text": f"{s['name']}의 감지 시 행동이 변경됨", "tier": "next"})
-        if (s.get("notify_contact_ids") or []) != (ls.get("notify_contact_ids") or []):
-            out.append({"text": f"{s['name']} 연락 대상 변경됨 — "
-                                f"{contact_names(s.get('notify_contact_ids')) or '없음'}",
-                        "tier": "instant"})
     for key, ls in live_s.items():
         if key not in draft_s:
             out.append({"text": f"시나리오 삭제됨 — {ls['name']}", "tier": "next"})
@@ -463,8 +488,11 @@ def _export_live(conn: sqlite3.Connection, agent_id: int = DEFAULT_AGENT_ID):
             "min_confidence": float(s.get("min_confidence", 0.7)),
             "detect_prompt": s.get("detect_prompt", ""),
             "nudge_template": s.get("nudge_template", ""),
-            "instructions": list(s.get("instructions", [])),
-            "action": s.get("action"),
+            # 행동은 시나리오가 아니라 개별 지침에 붙는다
+            "instructions": [
+                {"text": x["text"], **({"action": x["action"]} if x.get("action") else {})}
+                for x in normalize_instructions(s.get("instructions"))
+            ],
         }
         header = (
             "# 이 파일은 관리 콘솔이 배포할 때 자동으로 씁니다 (원천: data/console.db).\n"

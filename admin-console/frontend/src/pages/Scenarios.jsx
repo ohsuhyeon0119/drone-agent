@@ -5,11 +5,9 @@ import { useStore } from "../store.jsx";
 export default function Scenarios() {
   const { draft, toggleScenario } = useStore();
   const actionName = (id) => draft.actions.find((a) => a.id === id)?.name;
-  const contactNames = (ids) =>
-    (ids || [])
-      .map((id) => draft.contacts.find((c) => c.id === id)?.name)
-      .filter(Boolean)
-      .join(", ");
+  /* 지침에 붙은 행동들 — 행동은 시나리오가 아니라 개별 지침에 붙는다 */
+  const linkedActions = (s) =>
+    [...new Set((s.instructions || []).map((x) => x.action).filter(Boolean))];
 
   return (
     <>
@@ -42,25 +40,28 @@ export default function Scenarios() {
             <ul className="flex flex-col gap-5">
               {s.instructions.map((ins, i) => (
                 <li key={i} className="text-[28px] text-ink border-l-[3px] border-accent/50 pl-5 leading-relaxed">
-                  {ins}
+                  {ins.text}
+                  {ins.action && (
+                    <span className="block mt-1.5 text-[21px] font-semibold text-accent">
+                      → {actionName(ins.action)}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
 
             <div className="mt-auto flex items-center justify-between gap-3 flex-wrap border-t border-line/70 pt-6">
-              {s.onDetect ? (
+              {linkedActions(s).length > 0 ? (
                 <span className="flex flex-wrap items-center gap-2">
-                  <span className="inline-block text-[23px] font-semibold bg-accentsoft text-accent rounded-full px-4 py-2">
-                    감지되면 → {actionName(s.onDetect)}
-                  </span>
-                  {contactNames(s.notifyContactIds) && (
-                    <span className="text-[21px] text-muted">
-                      → {contactNames(s.notifyContactIds)}
+                  {linkedActions(s).map((a) => (
+                    <span key={a}
+                          className="inline-block text-[19px] font-semibold bg-accentsoft text-accent rounded-full px-4 py-2">
+                      {actionName(a)}
                     </span>
-                  )}
+                  ))}
                 </span>
               ) : (
-                <span className="text-[23px] text-muted/60">연결된 행동 없음</span>
+                <span className="text-[19px] text-muted/60">연결된 행동 없음</span>
               )}
               <Link
                 to={`/scenarios/${s.id}`}

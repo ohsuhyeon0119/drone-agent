@@ -75,9 +75,23 @@ PERSONA_BASE = """당신의 이름은 '동행이'입니다. 홀로 지내시거�
 - 묻지 않은 사생활을 캐묻기"""
 
 
-def _render_scenario_block(index: int, scenario: dict) -> str:
-    bullets = "\n".join(f"   - {line}" for line in scenario["instructions"])
-    return f"{index}. {scenario['name']} 신호를 받으면:\n{bullets}"
+def _render_scenario_block(index: int, scenario: dict, action_names: dict | None = None) -> str:
+    """지침을 렌더링하되, 행동이 붙은 지침은 그 자리에서 도구 호출을 지시한다.
+
+    지침 문장 안에 도구 이름을 손으로 적어두면 행동 이름을 바꾸는 순간 어긋난다.
+    연결을 데이터(instruction.action)로 두고 렌더링할 때 현재 id를 붙이면,
+    이름이 바뀌어도 항상 맞는 이름이 들어간다.
+    """
+    lines = []
+    for item in scenario.get("instructions", []):
+        text = item["text"] if isinstance(item, dict) else str(item)
+        action = item.get("action") if isinstance(item, dict) else None
+        if action:
+            label = (action_names or {}).get(action, action)
+            lines.append(f"   - {text}\n     → 이때 {action} 도구({label})를 호출하세요.")
+        else:
+            lines.append(f"   - {text}")
+    return f"{index}. {scenario['name']} 신호를 받으면:\n" + "\n".join(lines)
 
 
 def _render_actions_block(actions: list[dict]) -> str:
@@ -105,7 +119,9 @@ def build_unified_persona(scenarios: dict, actions: list[dict] | None = None) ->
     지침 부분만 `scenarios`(agent/scenarios.py, yaml로 오버라이드 가능)에서
     가져와 번호를 매겨 채워 넣는다.
     """
-    blocks = [_render_scenario_block(i, s) for i, s in enumerate(scenarios.values(), start=1)]
+    action_names = {a["id"]: a.get("name", a["id"]) for a in (actions or []) if a.get("id")}
+    blocks = [_render_scenario_block(i, s, action_names)
+              for i, s in enumerate(scenarios.values(), start=1)]
     other_index = len(blocks) + 1
     return (
         PERSONA_BASE

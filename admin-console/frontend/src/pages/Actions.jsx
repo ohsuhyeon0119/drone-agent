@@ -9,7 +9,8 @@ export default function Actions() {
   const navigate = useNavigate();
 
   /* 이 행동을 쓰는 시나리오 — 행동과 시나리오의 관계를 화면에서 바로 보이게 한다 */
-  const usedBy = (actionId) => draft.scenarios.filter((s) => s.onDetect === actionId);
+  const usedBy = (actionId) =>
+    draft.scenarios.filter((s) => (s.instructions || []).some((x) => x.action === actionId));
 
   return (
     <>
