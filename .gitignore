@@ -32,3 +32,12 @@ drone-agent-app/config/
 # 프런트엔드 빌드 산출물
 node_modules/
 dist/
+
+# 계정별로 내보내지는 시나리오 파일 (런타임 산출물).
+# 1번만 기본 시드로 커밋한다 — 새 계정은 여기서 복사되는 게 아니라
+# agent/scenarios.py의 DEFAULT_SCENARIOS에서 시작한다.
+drone-agent-app/agent/scenarios/*/
+!drone-agent-app/agent/scenarios/1/
+
+# 문서 변환 산출물
+*.docx
