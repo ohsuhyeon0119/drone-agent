@@ -29,6 +29,9 @@ body {
   font-family: var(--font-sans);
   line-height: 1.7;
   -webkit-font-smoothing: antialiased;
+  /* 한글은 기본값(break-all에 가까운 동작)이면 "배포합/니다."처럼 단어 중간에서
+     끊긴다. keep-all이면 어절 단위로 넘어가 읽기 흐름이 끊기지 않는다. */
+  word-break: keep-all;
 }
 
 /* 좁은 화면에서는 기준 크기를 조금 낮춰 가로 스크롤을 막는다 */
