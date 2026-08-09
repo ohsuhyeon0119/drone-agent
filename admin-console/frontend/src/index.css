@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-ink: #1b1f27;
+  --color-muted: #454d61;
+  --color-line: #e5e8ee;
+  --color-accent: #2e6be6;
+  --color-accentsoft: #eaf1fe;
+  --color-warn: #de5b2b;
+  --color-warnsoft: #fceee7;
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system,
+    "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --radius-card: 12px;
+  --radius-ctl: 10px;
+}
+
+html {
+  /* 노인 친화 기준 — ADMIN_DESIGN §3.
+     Tailwind의 여백·컨트롤 크기는 rem 기반이라 이 값이 UI 전체 밀도를 결정한다. */
+  font-size: 26px;
+}
+
+body {
+  font-weight: 500;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 좁은 화면에서는 기준 크기를 조금 낮춰 가로 스크롤을 막는다 */
+@media (max-width: 900px) {
+  html { font-size: 20px; }
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
