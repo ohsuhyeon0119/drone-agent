@@ -5,7 +5,6 @@ import Layout from "./components/Layout.jsx";
 import "./index.css";
 import ActionDetail from "./pages/ActionDetail.jsx";
 import Actions from "./pages/Actions.jsx";
-import Agent from "./pages/Agent.jsx";
 import Contacts from "./pages/Contacts.jsx";
 import Deploy from "./pages/Deploy.jsx";
 import Login from "./pages/Login.jsx";
@@ -34,8 +33,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
               </RequireAuth>
             }
           >
-            <Route path="/" element={<Navigate to="/agent" replace />} />
-            <Route path="/agent" element={<Agent />} />
+            <Route path="/" element={<Navigate to="/scenarios" replace />} />
             <Route path="/scenarios" element={<Scenarios />} />
             <Route path="/scenarios/:id" element={<ScenarioDetail />} />
             <Route path="/actions" element={<Actions />} />
@@ -43,7 +41,7 @@ ReactDOM.createRoot(document.getElementById("root")).render(
             <Route path="/contacts" element={<Contacts />} />
             <Route path="/deploy" element={<Deploy />} />
           </Route>
-          <Route path="*" element={<Navigate to="/agent" replace />} />
+          <Route path="*" element={<Navigate to="/scenarios" replace />} />
         </Routes>
       </HashRouter>
     </StoreProvider>

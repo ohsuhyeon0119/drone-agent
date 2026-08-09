@@ -19,7 +19,7 @@ export default function Login() {
       return;
     }
     localStorage.setItem("donghaeng-authed", "1");
-    navigate("/agent");
+    navigate("/scenarios");
   };
 
   return (

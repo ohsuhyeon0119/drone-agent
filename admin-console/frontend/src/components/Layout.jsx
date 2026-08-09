@@ -1,23 +1,14 @@
 import { useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useStore } from "../store.jsx";
 
 const MENU = [
-  { to: "/agent", label: "에이전트", icon: IconAgent },
   { to: "/scenarios", label: "시나리오", icon: IconEye },
   { to: "/actions", label: "행동", icon: IconHand },
   { to: "/contacts", label: "알림 연락처", icon: IconPhone },
   { to: "/deploy", label: "배포", icon: IconShip },
 ];
 
-function IconAgent() {
-  return (
-    <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="7" width="18" height="12" rx="3" />
-      <path d="M12 3v4M8 12h.01M16 12h.01M9.5 15.5c1.5 1 3.5 1 5 0" />
-    </svg>
-  );
-}
 
 function IconEye() {
   return (
@@ -76,7 +67,6 @@ export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false); // 모바일: 오버레이
   const { live, changes } = useStore();
   const navigate = useNavigate();
-  const onAgentPage = useLocation().pathname.startsWith("/agent");
 
   return (
     <div className="min-h-screen md:flex">
@@ -125,10 +115,7 @@ export default function Layout() {
       </aside>
 
       <main className="flex-1 min-w-0">
-        {/* 에이전트 화면은 임베드된 앱이 폭을 최대한 쓰도록 여백을 줄인다 */}
-        <div className={onAgentPage
-          ? "w-full px-3 sm:px-5 py-4 sm:py-6"
-          : "w-full px-4 sm:px-10 py-6 sm:py-12"}>
+        <div className="w-full px-4 sm:px-10 py-6 sm:py-12">
           <Outlet />
         </div>
       </main>
