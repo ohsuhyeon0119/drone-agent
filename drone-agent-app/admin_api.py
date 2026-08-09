@@ -47,7 +47,9 @@ async def signup(
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "token": accounts.make_token(user["id"]),
             "email": user["email"], "name": user["name"],
-            "agent_id": user["agent_id"]}
+            "agent_id": user["agent_id"],
+            # 가입 완료 화면에서 바로 보여준다 — 어르신 폰에 넣어야 하는 값이다.
+            "pair_code": user["pair_code"]}
 
 
 @router.post("/login")
@@ -70,8 +72,25 @@ async def me(user: dict = Depends(require_auth)):
     """
     # agent_id도 함께 준다 — 노트북을 카메라로 쓸 때 기기가 어느 어르신 곁인지
     # 알려야 하고(/ws/unified?agent=N), 그 값을 화면이 알 방법이 여기밖에 없다.
+    # pair_code는 어르신 폰에 넣을 값이라 콘솔이 항상 다시 보여줄 수 있어야 한다.
     return {"ok": True, "email": user["email"], "name": user["name"],
-            "agent_id": user["agent_id"]}
+            "agent_id": user["agent_id"],
+            "pair_code": admin_store.get_pair_code(user["agent_id"])}
+
+
+@router.get("/pair-code")
+async def pair_code(user: dict = Depends(require_auth)):
+    """어르신 폰에 넣을 코드. 가입 화면을 지나친 뒤에도 콘솔에서 다시 볼 수 있어야 한다."""
+    return {"pair_code": admin_store.get_pair_code(user["agent_id"])}
+
+
+@router.post("/pair-code/regenerate")
+async def pair_code_regenerate(user: dict = Depends(require_auth)):
+    """코드를 새로 발급한다. 기존 코드로 붙어 있던 폰은 다음 연결부터 거부된다."""
+    code = admin_store.regenerate_pair_code(user["agent_id"])
+    admin_store.log_event("pair_code_regenerated", {"by": user["email"]},
+                          agent_id=user["agent_id"])
+    return {"ok": True, "pair_code": code}
 
 
 @router.get("/config")

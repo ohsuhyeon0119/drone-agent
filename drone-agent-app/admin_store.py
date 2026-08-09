@@ -33,6 +33,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import sqlite3
 from contextlib import closing
 from datetime import datetime
@@ -91,11 +92,16 @@ BUILTIN_ACTIONS = [
 ]
 
 SCHEMA = """
+-- pair_code: 어르신 폰(앱)이 입력하는 6자 코드. 보호자 로그인과 별개다 —
+-- 어르신에게 이메일·비밀번호를 치게 할 수는 없기 때문이다.
 CREATE TABLE IF NOT EXISTS agents (
   id          INTEGER PRIMARY KEY,
   name        TEXT NOT NULL,
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,
+  pair_code   TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_pair_code
+  ON agents(pair_code) WHERE pair_code IS NOT NULL;
 
 -- 배포된 버전 = 불변 스냅샷
 CREATE TABLE IF NOT EXISTS config_versions (
@@ -284,6 +290,7 @@ def init_db():
     """테이블 생성 + 최초 실행 시 yaml에서 v1 스냅샷 이관."""
     _migrate_flat_scenarios()
     with closing(_connect()) as conn, conn:
+        _migrate_pair_code(conn)
         conn.executescript(SCHEMA)
         row = conn.execute("SELECT COUNT(*) c FROM agents").fetchone()
         if row["c"] == 0:
@@ -296,6 +303,75 @@ def init_db():
         # 기존 에이전트들의 내보내기 파일을 최신 상태로 맞춘다
         for r in conn.execute("SELECT DISTINCT agent_id FROM config_versions").fetchall():
             _export_live(conn, r["agent_id"])
+
+        # 코드가 없는 에이전트(마이그레이션 이전에 만들어진 것)에 하나씩 채운다
+        for r in conn.execute(
+            "SELECT id FROM agents WHERE pair_code IS NULL OR pair_code=''"
+        ).fetchall():
+            ensure_pair_code(conn, r["id"])
+
+
+# ──────────────────────────────────────────────────────────────
+# 페어링 코드 — 어르신 폰이 입력하는 6자
+# ──────────────────────────────────────────────────────────────
+# 눈으로 읽고 손으로 옮겨 적는 코드라 헷갈리는 글자를 뺀다: I/1/L, O/0.
+PAIR_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+PAIR_CODE_LENGTH = 6
+
+
+def _migrate_pair_code(conn: sqlite3.Connection):
+    """이미 만들어진 agents 테이블에 컬럼을 덧붙인다 (CREATE TABLE IF NOT EXISTS는
+    기존 테이블을 고치지 않는다)."""
+    columns = {r["name"] for r in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    if columns and "pair_code" not in columns:
+        conn.execute("ALTER TABLE agents ADD COLUMN pair_code TEXT")
+        logger.info("[admin_store] agents.pair_code 컬럼 추가")
+
+
+def _random_pair_code() -> str:
+    return "".join(secrets.choice(PAIR_CODE_ALPHABET) for _ in range(PAIR_CODE_LENGTH))
+
+
+def ensure_pair_code(conn: sqlite3.Connection, agent_id: int) -> str:
+    """이미 있으면 그대로, 없으면 유일한 코드를 만들어 저장하고 돌려준다."""
+    row = conn.execute("SELECT pair_code FROM agents WHERE id=?", (agent_id,)).fetchone()
+    if row and row["pair_code"]:
+        return row["pair_code"]
+
+    for _ in range(20):
+        code = _random_pair_code()
+        taken = conn.execute("SELECT 1 FROM agents WHERE pair_code=?", (code,)).fetchone()
+        if taken:
+            continue
+        conn.execute("UPDATE agents SET pair_code=? WHERE id=?", (code, agent_id))
+        logger.info(f"[admin_store] agent {agent_id} 페어링 코드 발급")
+        return code
+    raise RuntimeError("페어링 코드를 생성하지 못했습니다.")
+
+
+def get_pair_code(agent_id: int) -> str | None:
+    with closing(_connect()) as conn:
+        row = conn.execute("SELECT pair_code FROM agents WHERE id=?", (agent_id,)).fetchone()
+    return row["pair_code"] if row else None
+
+
+def regenerate_pair_code(agent_id: int) -> str:
+    """코드가 유출됐을 때 새로 발급한다. 기존 코드로 페어링한 기기는 즉시 무효가 된다."""
+    with closing(_connect()) as conn, conn:
+        conn.execute("UPDATE agents SET pair_code=NULL WHERE id=?", (agent_id,))
+        return ensure_pair_code(conn, agent_id)
+
+
+def agent_by_pair_code(code: str) -> dict | None:
+    """코드로 에이전트를 찾는다. 대소문자·공백·하이픈은 무시한다."""
+    normalized = (code or "").strip().upper().replace("-", "").replace(" ", "")
+    if not normalized:
+        return None
+    with closing(_connect()) as conn:
+        row = conn.execute(
+            "SELECT id, name FROM agents WHERE pair_code=?", (normalized,)
+        ).fetchone()
+    return {"agent_id": row["id"], "agent_name": row["name"]} if row else None
 
 
 # ──────────────────────────────────────────────────────────────

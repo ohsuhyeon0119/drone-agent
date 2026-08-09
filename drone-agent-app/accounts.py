@@ -104,6 +104,31 @@ def make_token(user_id: int) -> str:
     return f"{user_id}.{sig}"
 
 
+def make_device_token(agent_id: int) -> str:
+    """어르신 폰(앱)용 토큰 — `d<agent_id>.<서명>`.
+
+    보호자 토큰과 서명 대상 문자열을 다르게 둔다("device:" 접두사). 같은 형식이면
+    폰 토큰으로 보호자 API를 부르거나 그 반대가 가능해진다. 폰은 대화 세션만
+    열 수 있어야 하고 설정을 바꿀 수는 없어야 한다.
+    """
+    sig = hmac.new(_SECRET.encode(), f"device:{agent_id}".encode(), hashlib.sha256).hexdigest()
+    return f"d{agent_id}.{sig}"
+
+
+def agent_id_from_device_token(token: str) -> int | None:
+    if not token or not token.startswith("d") or "." not in token:
+        return None
+    raw_id, _, sig = token[1:].partition(".")
+    if not raw_id.isdigit():
+        return None
+    expected = hmac.new(
+        _SECRET.encode(), f"device:{raw_id}".encode(), hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    return int(raw_id)
+
+
 def user_id_from_token(token: str) -> int | None:
     if not token or "." not in token:
         return None
@@ -155,9 +180,13 @@ def signup(email: str, password: str, name: str) -> dict:
         )
         user_id = cur.lastrowid
         admin_store.seed_agent(conn, agent_id)
+        # 어르신 폰이 입력할 코드는 가입 시점에 만든다 — 가입 완료 화면에서 바로
+        # 보여줘야 보호자가 그 자리에서 폰에 적어 넣을 수 있다.
+        pair_code = admin_store.ensure_pair_code(conn, agent_id)
 
     logger.info(f"[accounts] 가입: {email} (agent_id={agent_id})")
-    return {"id": user_id, "email": email, "name": name, "agent_id": agent_id}
+    return {"id": user_id, "email": email, "name": name, "agent_id": agent_id,
+            "pair_code": pair_code}
 
 
 def authenticate(email: str, password: str) -> dict:

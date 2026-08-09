@@ -20,7 +20,7 @@ import os
 import time
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -119,6 +119,30 @@ async def unified_page():
 async def medication_state():
     """대시보드가 새로고침 시에도 지금까지의 메모리 기록을 볼 수 있게 하는 조회용 엔드포인트."""
     return {"profile": memory.get_profile(), "logs": memory.get_logs()}
+
+
+@app.post("/api/pair")
+async def pair_device(code: str = Body(..., embed=True)):
+    """어르신 폰이 6자 코드를 신원으로 바꿔 가는 곳.
+
+    보호자는 이메일·비밀번호로 로그인하지만 어르신에게 그걸 시킬 수는 없다.
+    코드 하나를 넣으면 그 에이전트에 묶인 기기 토큰을 받아, 이후 연결마다
+    "내가 누구의 곁에 있는지"를 서버에 증명한다.
+    """
+    found = admin_store.agent_by_pair_code(code)
+    if not found:
+        raise HTTPException(status_code=404, detail="코드를 찾을 수 없습니다.")
+
+    agent_id = found["agent_id"]
+    profile = admin_store.get_profile(agent_id)
+    admin_store.log_event("device_paired", {"agent_id": agent_id}, agent_id=agent_id)
+    return {
+        "ok": True,
+        "token": accounts.make_device_token(agent_id),
+        "agent_id": agent_id,
+        "agent_name": found["agent_name"],
+        "elder_name": profile.get("name") or "",
+    }
 
 
 @app.post("/api/remind-medication")
@@ -227,10 +251,19 @@ async def _receive_from_client(websocket, audio_input_queue, video_input_queue, 
     """브라우저 → 모델 입력. 폰(드론 카메라)이 송출 중일 때만 브라우저의 마이크
     오디오와 웹캠 이미지를 버리고(이중 입력 방지), 아니면 그대로 모델에 넣는다.
     텍스트 메시지는 항상 통과."""
+    # 마이크가 실제로 들어오는지 세어둔다. 영상만 흐르고 대화가 안 될 때
+    # "클라이언트가 안 보내는 것"과 "서버가 버리는 것"을 구분할 방법이 없었다.
+    audio_chunks = 0
+    audio_bytes = 0
     try:
         while True:
             message = await websocket.receive()
             if message.get("bytes"):
+                audio_chunks += 1
+                audio_bytes += len(message["bytes"])
+                if audio_chunks % 100 == 0:
+                    logger.info(f"[/unified] 마이크 수신 {audio_chunks}청크 / {audio_bytes:,}바이트"
+                                f"{' (폰스트림 우선이라 버리는 중)' if _phone_is_active(phone_active) else ''}")
                 if not _phone_is_active(phone_active):
                     await audio_input_queue.put(message["bytes"])
             elif message.get("text"):
@@ -315,13 +348,20 @@ async def ws_unified(websocket: WebSocket):
     """
     await websocket.accept()
 
-    # 보호자마다 계정과 에이전트가 따로 있으므로, 이 기기가 누구의 어르신
-    # 곁에 있는지 알아야 한다. 기기 주소에 ?agent=N으로 붙인다.
-    # 값이 없으면 1번 — 계정이 하나뿐이던 시절의 기기 주소를 그대로 살린다.
-    try:
-        agent_id = int(websocket.query_params.get("agent") or admin_store.DEFAULT_AGENT_ID)
-    except ValueError:
-        agent_id = admin_store.DEFAULT_AGENT_ID
+    # 이 기기가 누구의 어르신 곁에 있는지 알아야 한다.
+    #
+    # 우선순위는 ?token= (페어링으로 발급된 기기 토큰)이다. ?agent=N은 서명이
+    # 없어서 아무나 남의 번호를 적어 넣을 수 있으므로, 토큰이 있으면 그쪽만 믿는다.
+    # 번호 방식은 코드 발급 이전에 만들어둔 데모 주소를 위해 남겨둔다.
+    agent_id = accounts.agent_id_from_device_token(
+        websocket.query_params.get("token") or ""
+    )
+    if agent_id is None:
+        try:
+            agent_id = int(websocket.query_params.get("agent") or admin_store.DEFAULT_AGENT_ID)
+        except ValueError:
+            agent_id = admin_store.DEFAULT_AGENT_ID
+        logger.warning(f"[/unified] 서명 없는 접속 (agent={agent_id})")
     logger.info(f"[/unified] WebSocket connection accepted (agent={agent_id})")
 
     # 콘솔이 이 세션을 들여다볼 수 있게 이벤트를 복사해 흘린다. 감싸기만 하므로

@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# 로컬 상태 (콘솔 DB, 메모리)
+data/
+
+# ── iOS ──────────────────────────────────────────────
+# Xcode 사용자별 상태 — 사람마다 다르고 충돌만 만든다
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+ios/**/*.pbxproj.bak
+ios/DerivedData/
+ios/build/
+
+# 앱 타겟 폴더의 소스는 ios/Sources/에서 install.sh가 복사하는 생성물이다.
+# 원천은 ios/Sources/ 한 곳만 둔다 (두 벌을 커밋하면 반드시 어긋난다).
+ios/DroneAgent/DroneAgent/*.swift
+ios/DroneAgent/Info.plist
