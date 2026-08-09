@@ -185,28 +185,84 @@ final class AudioIO {
 
     // MARK: - 24kHz PCM16 → 스피커
 
+    /// 도착한 조각을 곧바로 재생 예약하면 네트워크 지터가 그대로 소리 구멍이 된다.
+    /// 조금 모았다가(프라임) 일정 크기로 잘라 넣어, 잠깐 늦게 오는 조각을 흡수한다.
+    /// 대가는 시작 지연 \(primeMilliseconds)ms인데, 끊기는 것보다 낫다.
+    private let primeMilliseconds = 220
+    private let chunkMilliseconds = 80
+
+    private var pending = Data()
+    private var isPriming = true
+    private var scheduledChunks = 0
+
+    private var primeBytes: Int { bytes(forMilliseconds: primeMilliseconds) }
+    private var chunkBytes: Int { bytes(forMilliseconds: chunkMilliseconds) }
+
+    private func bytes(forMilliseconds ms: Int) -> Int {
+        // 16비트 mono라 프레임당 2바이트
+        Int(Config.playSampleRate) * 2 * ms / 1000
+    }
+
     func play(_ data: Data) {
         ioQueue.async { [weak self] in
-            guard let self else { return }
-            let frames = data.count / MemoryLayout<Int16>.size
-            guard frames > 0,
-                  self.engine.isRunning,
-                  let buffer = AVAudioPCMBuffer(pcmFormat: self.playFormat,
-                                                frameCapacity: AVAudioFrameCount(frames)) else { return }
-            buffer.frameLength = AVAudioFrameCount(frames)
+            guard let self, self.engine.isRunning else { return }
+            self.pending.append(data)
 
-            // Data가 정렬돼 있다는 보장이 없어 배열로 한 번 복사한 뒤 변환한다.
-            var pcm = [Int16](repeating: 0, count: frames)
-            _ = pcm.withUnsafeMutableBytes { data.copyBytes(to: $0, from: 0 ..< frames * MemoryLayout<Int16>.size) }
-
-            let destination = buffer.floatChannelData![0]
-            for i in 0 ..< frames {
-                destination[i] = Float(pcm[i]) / 32768.0
+            // 말이 시작될 때만 모은다. 한 번 흐르기 시작하면 계속 이어 붙인다.
+            if self.isPriming {
+                guard self.pending.count >= self.primeBytes else { return }
+                self.isPriming = false
             }
-
-            self.player.scheduleBuffer(buffer, completionHandler: nil)
-            if !self.player.isPlaying { self.player.play() }
+            self.drain(chunkSize: self.chunkBytes)
         }
+    }
+
+    /// 한 턴이 끝나면 남은 꼬리를 마저 내보낸다. 안 그러면 마지막 한 음절이 잘린다.
+    func endOfTurn() {
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            self.drain(chunkSize: 1)
+            self.isPriming = true
+        }
+    }
+
+    private func drain(chunkSize: Int) {
+        while pending.count >= chunkSize, pending.count > 0 {
+            let size = min(chunkBytes, pending.count)
+            let chunk = pending.prefix(size)
+            pending.removeFirst(size)
+            schedule(Data(chunk))
+        }
+    }
+
+    private func schedule(_ data: Data) {
+        let frames = data.count / MemoryLayout<Int16>.size
+        guard frames > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: playFormat,
+                                            frameCapacity: AVAudioFrameCount(frames)) else { return }
+        buffer.frameLength = AVAudioFrameCount(frames)
+
+        // Data가 정렬돼 있다는 보장이 없어 배열로 한 번 복사한 뒤 변환한다.
+        var pcm = [Int16](repeating: 0, count: frames)
+        _ = pcm.withUnsafeMutableBytes { data.copyBytes(to: $0, from: 0 ..< frames * MemoryLayout<Int16>.size) }
+
+        let destination = buffer.floatChannelData![0]
+        for i in 0 ..< frames {
+            destination[i] = Float(pcm[i]) / 32768.0
+        }
+
+        scheduledChunks += 1
+        player.scheduleBuffer(buffer) { [weak self] in
+            guard let self else { return }
+            self.ioQueue.async {
+                self.scheduledChunks -= 1
+                // 예약이 다 소진되면 다음 말은 처음부터 다시 모은다.
+                if self.scheduledChunks == 0 && self.pending.isEmpty {
+                    self.isPriming = true
+                }
+            }
+        }
+        if !player.isPlaying { player.play() }
     }
 
     /// 사용자가 말을 끊었을 때(서버의 `interrupted` 이벤트) 이미 예약된 AI 음성을 버린다.
@@ -214,6 +270,9 @@ final class AudioIO {
     func flushPlayback() {
         ioQueue.async { [weak self] in
             guard let self, self.engine.isRunning else { return }
+            self.pending.removeAll()
+            self.scheduledChunks = 0
+            self.isPriming = true
             self.player.stop()
             self.player.play()
         }

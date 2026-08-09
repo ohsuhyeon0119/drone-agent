@@ -57,6 +57,10 @@ PHONE_VIDEO_TO_GEMINI_INTERVAL = 1.0
 # 폰 패킷이 이 시간(초) 안에 들어왔으면 "폰 송출 중"으로 보고 브라우저 입력을 무시
 PHONE_ACTIVE_WINDOW = 3.0
 
+# 기기는 관전 화면이 부드럽도록 초당 여러 장을 보내지만, 모델에 넣는 것은
+# 이 간격으로 솎아낸다 — 판단이 나아지지 않으면서 토큰만 늘어나기 때문이다.
+MODEL_FRAME_INTERVAL = 1.0
+
 # 페르소나(agent/persona.py)와 tool 정의(agent/tools.py)는 agent/ 아래로 분리했다.
 
 async def _record_medication_on_detect(websocket, result):
@@ -255,6 +259,7 @@ async def _receive_from_client(websocket, audio_input_queue, video_input_queue, 
     # "클라이언트가 안 보내는 것"과 "서버가 버리는 것"을 구분할 방법이 없었다.
     audio_chunks = 0
     audio_bytes = 0
+    last_model_frame_at = 0.0
     try:
         while True:
             message = await websocket.receive()
@@ -273,9 +278,17 @@ async def _receive_from_client(websocket, audio_input_queue, video_input_queue, 
                     if isinstance(payload, dict) and payload.get("type") == "image":
                         if not _phone_is_active(phone_active):
                             image_data = base64.b64decode(payload["data"])
-                            await video_input_queue.put(image_data)
+                            # 프레임은 두 곳에서 쓰인다. 관전 화면은 부드러워야 해서
+                            # 들어오는 대로 전부 받고, Gemini는 초당 한 장이면 충분하다
+                            # (더 보내도 판단이 나아지지 않고 토큰만 늘어난다).
+                            now = time.monotonic()
+                            if now - last_model_frame_at >= MODEL_FRAME_INTERVAL:
+                                last_model_frame_at = now
+                                await video_input_queue.put(image_data)
                             if frame_buffer is not None:
                                 frame_buffer["data"] = image_data
+                                # 관전자가 같은 장면을 다시 받지 않도록 갱신을 표시한다
+                                frame_buffer["seq"] = frame_buffer.get("seq", 0) + 1
                         continue
                 except json.JSONDecodeError:
                     pass
@@ -583,22 +596,23 @@ async def ws_monitor(websocket: WebSocket):
             "events": live_monitor.monitor.recent(agent_id),
         })
 
-        last_frame_at = 0.0
+        last_seq = -1
         while True:
-            # 이벤트를 기다리되, 영상이 멈춰 보이지 않게 주기적으로 깨어난다
+            # 이벤트를 기다리되, 영상이 멈춰 보이지 않게 자주 깨어난다
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=0.4)
+                event = await asyncio.wait_for(queue.get(), timeout=0.05)
                 await websocket.send_json({"type": "event", "event": event})
             except asyncio.TimeoutError:
                 pass
 
-            # 프레임은 초당 2장이면 "지금 무엇을 보고 있는지" 확인에 충분하다.
-            # 매 프레임 보내면 관전자 한 명이 세션 대역폭을 그만큼 더 먹는다.
-            now = time.monotonic()
-            if now - last_frame_at >= 0.5:
+            # 새 장면이 들어왔을 때만 보낸다. 고정 간격으로 퍼내면 기기가 더 자주
+            # 보내도 화면이 그만큼 뚝뚝 끊기고, 반대로 기기가 멈춰 있으면 같은
+            # 장면을 반복해서 실어 대역폭만 먹는다.
+            seq = live_monitor.monitor.frame_seq(agent_id)
+            if seq != last_seq:
                 frame = live_monitor.monitor.frame(agent_id)
                 if frame:
-                    last_frame_at = now
+                    last_seq = seq
                     await websocket.send_bytes(frame)
     except WebSocketDisconnect:
         pass

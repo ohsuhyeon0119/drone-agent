@@ -72,6 +72,11 @@ class LiveMonitor:
         session = self._sessions.get(agent_id)
         return session["frames"].get("data") if session else None
 
+    def frame_seq(self, agent_id: int) -> int:
+        """장면이 바뀔 때마다 올라가는 번호. 관전자가 같은 장면을 다시 받지 않게 한다."""
+        session = self._sessions.get(agent_id)
+        return session["frames"].get("seq", 0) if session else -1
+
     def status(self, agent_id: int) -> dict:
         session = self._sessions.get(agent_id)
         return {"connected": bool(session), "since": session["since"] if session else None}

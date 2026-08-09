@@ -17,6 +17,16 @@ final class AppModel: ObservableObject {
     @Published var alertIsPositive = false
     @Published var isBusy = false
 
+    /// 카메라 위에 겹쳐 보여줄 기록. 평소에는 화면을 가리지 않도록 감춰두고
+    /// 버튼을 눌렀을 때만 반투명으로 띄운다.
+    struct LogLine: Identifiable {
+        let id = UUID()
+        let time: String
+        let text: String
+        let emphasized: Bool
+    }
+    @Published private(set) var logLines: [LogLine] = []
+
     let camera = CameraCapture()
     private let audio = AudioIO()
     private let socket = SessionClient()
@@ -95,6 +105,7 @@ final class AppModel: ObservableObject {
         caption = ""
         detections = [:]
         detectionOrder = []
+        logLines = []
         captionClosed = true
         isLive = true
     }
@@ -148,6 +159,10 @@ final class AppModel: ObservableObject {
 
         case "turn_complete":
             captionClosed = true
+            audio.endOfTurn()
+            if let line = caption.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty {
+                appendLog("동행이: \(line)")
+            }
 
         case "interrupted":
             // 사용자가 끼어들었다 — 예약된 AI 음성을 즉시 버린다.
@@ -172,27 +187,50 @@ final class AppModel: ObservableObject {
             }
             if detections[source] == nil { detectionOrder.append(source) }
             detections[source] = line
+            // 감지되지 않은 판정까지 기록에 쌓으면 정작 잡힌 순간이 묻힌다.
+            if (event.raw["event"] as? String).map({ $0 != "none" }) == true {
+                appendLog(line, emphasized: true)
+            }
 
         case "system_nudge":
             showAlert("▶︎ 감지 확정 — 동행이가 먼저 말을 겁니다", positive: true)
+            appendLog("▶︎ 감지 확정 — 동행이가 먼저 말을 겁니다", emphasized: true)
 
         case "memory_update":
             showAlert(event.message ?? "메모리 업데이트됨", positive: true)
+            appendLog(event.message ?? "기록 남김", emphasized: true)
 
         case "alert":
             showAlert(event.message ?? "알림")
+            appendLog("🚨 \(event.message ?? "알림")", emphasized: true)
 
         case "tool_call", "tool_result":
             if let name = event.raw["name"] as? String {
                 showAlert("도구 실행: \(name)", positive: true)
+                appendLog("행동 실행 · \(name)", emphasized: true)
             }
 
         case "error":
-            status = "오류: " + ((event.raw["error"] as? String) ?? "알 수 없음")
+            let text = (event.raw["error"] as? String) ?? "알 수 없음"
+            status = "오류: " + text
+            appendLog("오류: \(text)", emphasized: true)
 
         default:
             break
         }
+    }
+
+    private static let clock: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
+    private func appendLog(_ text: String, emphasized: Bool = false) {
+        logLines.append(LogLine(time: Self.clock.string(from: Date()),
+                                text: text, emphasized: emphasized))
+        // 오래 켜두는 화면이라 무한히 쌓이면 메모리와 스크롤 둘 다 감당이 안 된다.
+        if logLines.count > 120 { logLines.removeFirst(logLines.count - 120) }
     }
 
     private func showAlert(_ text: String, positive: Bool = false) {
@@ -205,4 +243,9 @@ final class AppModel: ObservableObject {
             await MainActor.run { self?.alertText = nil }
         }
     }
+}
+
+private extension String {
+    /// 빈 문자열을 nil로 — 공백뿐인 자막을 기록에 남기지 않기 위함.
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

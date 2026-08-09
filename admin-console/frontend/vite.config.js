@@ -13,7 +13,18 @@ export default defineConfig({
       "/agent-static": "http://localhost:8004",
       // 모니터링 화면이 세션을 들여다보는 관전 채널 (ws: true가 없으면
       // 업그레이드 요청이 프록시되지 않아 연결이 그냥 실패한다)
-      "/ws": { target: "ws://localhost:8004", ws: true },
+      "/ws": {
+        target: "ws://localhost:8004",
+        ws: true,
+        // 관전 소켓이 끊길 때(에이전트 서버 재시작, 폰이 대화 종료) 나는
+        // ECONNRESET을 받아주지 않으면 dev 서버 프로세스가 통째로 죽는다.
+        // 개발 중에 서버를 다시 띄울 때마다 콘솔이 사라지는 원인이었다.
+        configure: (proxy) => {
+          proxy.on("error", (err) => {
+            console.warn(`[proxy] 관전 소켓 오류(무시): ${err.message}`);
+          });
+        },
+      },
     },
   },
 });

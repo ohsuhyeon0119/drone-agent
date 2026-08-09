@@ -66,8 +66,9 @@ enum Config {
     /// Gemini Live가 내보내는 출력 포맷: 24kHz mono PCM16 raw.
     static let playSampleRate: Double = 24_000
 
-    /// 웹 클라이언트와 동일하게 초당 1장. 감지 루프가 2초마다 도니 이 이상은 낭비다.
-    static let frameInterval: TimeInterval = 1.0
+    /// 보호자 콘솔의 관전 화면이 부드러워야 해서 초당 5장을 보낸다.
+    /// 모델에 넣는 것은 서버가 초당 1장으로 솎아내므로 토큰 비용은 그대로다.
+    static let frameInterval: TimeInterval = 0.2
 
     static let jpegQuality: Double = 0.7
 
