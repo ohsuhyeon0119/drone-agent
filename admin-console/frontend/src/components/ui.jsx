@@ -2,7 +2,7 @@
 
 export function Button({ variant = "outline", className = "", ...props }) {
   const base =
-    "inline-flex items-center justify-center gap-2 h-14 px-6 text-[26px] rounded-(--radius-ctl) " +
+    "inline-flex items-center justify-center gap-2 h-14 px-6 text-[19px] rounded-(--radius-ctl) " +
     "font-bold transition-colors duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-default";
   const styles = {
     primary: "bg-accent text-white hover:bg-[#2257c4]",
@@ -45,7 +45,7 @@ export function Modal({ open, title, children, onClose }) {
         className="w-full max-w-[560px] max-h-[90vh] overflow-y-auto bg-surface rounded-(--radius-card) p-9 shadow-lg"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-[35px] font-bold mb-5">{title}</h2>
+        <h2 className="text-[24px] font-bold mb-5">{title}</h2>
         {children}
       </div>
     </div>
@@ -54,7 +54,7 @@ export function Modal({ open, title, children, onClose }) {
 
 export function EmptyState({ children }) {
   return (
-    <div className="border border-dashed border-line rounded-(--radius-card) py-14 px-6 text-center text-muted text-[26px]">
+    <div className="border border-dashed border-line rounded-(--radius-card) py-14 px-6 text-center text-muted text-[19px]">
       {children}
     </div>
   );
@@ -63,8 +63,8 @@ export function EmptyState({ children }) {
 export function PageHeader({ title, sub }) {
   return (
     <header className="mb-9">
-      <h1 className="text-[49px] font-bold [text-wrap:balance]">{title}</h1>
-      {sub && <p className="text-muted mt-2 text-[26px]">{sub}</p>}
+      <h1 className="text-[34px] font-bold [text-wrap:balance]">{title}</h1>
+      {sub && <p className="text-muted mt-2 text-[19px]">{sub}</p>}
     </header>
   );
 }
@@ -72,13 +72,13 @@ export function PageHeader({ title, sub }) {
 export function Field({ label, help, children }) {
   return (
     <label className="block mb-5">
-      <span className="block text-[26px] font-bold mb-2">{label}</span>
+      <span className="block text-[19px] font-bold mb-2">{label}</span>
       {children}
-      {help && <span className="block text-[23px] text-muted mt-1.5">{help}</span>}
+      {help && <span className="block text-[17px] text-muted mt-1.5">{help}</span>}
     </label>
   );
 }
 
 export const inputCls =
-  "w-full h-14 px-4 text-[26px] rounded-(--radius-ctl) border border-line bg-surface " +
+  "w-full h-14 px-4 text-[19px] rounded-(--radius-ctl) border border-line bg-surface " +
   "placeholder:text-muted/60 focus:border-accent";

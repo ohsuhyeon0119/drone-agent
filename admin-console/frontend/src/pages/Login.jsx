@@ -56,18 +56,18 @@ export default function Login() {
           />
         </Field>
 
-        {error && <p role="alert" className="text-warn text-[24px] mb-4">{error}</p>}
+        {error && <p role="alert" className="text-warn text-[18px] mb-4">{error}</p>}
 
         <Button
           variant="primary"
           type="submit"
           disabled={busy || !email.trim() || !pw}
-          className="w-full h-16 text-[30px] mt-3"
+          className="w-full h-16 text-[22px] mt-3"
         >
           {busy ? "확인 중…" : "로그인"}
         </Button>
 
-        <p className="text-muted text-[24px] mt-6 text-center">
+        <p className="text-muted text-[18px] mt-6 text-center">
           아직 계정이 없으신가요?{" "}
           <Link to="/signup" className="text-accent font-bold hover:underline">회원가입</Link>
         </p>

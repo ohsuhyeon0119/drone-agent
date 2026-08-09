@@ -45,14 +45,14 @@ export default function ScenarioNew() {
 
   return (
     <>
-      <nav className="text-[24px] text-muted mb-4">
+      <nav className="text-[18px] text-muted mb-4">
         <Link to="/scenarios" className="hover:text-accent">시나리오</Link>
         <span className="mx-2">›</span>
         <span className="text-ink">새 시나리오</span>
       </nav>
 
-      <h1 className="text-[49px] font-bold mb-2">시나리오 추가</h1>
-      <p className="text-muted text-[26px] mb-9">
+      <h1 className="text-[34px] font-bold mb-2">시나리오 추가</h1>
+      <p className="text-muted text-[19px] mb-9">
         언제 발동할지 정하면, 감지됐을 때 동행이가 어떻게 대응할지는 다음 화면에서 지침으로 정합니다.
       </p>
 
@@ -77,7 +77,7 @@ export default function ScenarioNew() {
             value={key}
             onChange={(e) => setKey(e.target.value)}
           />
-          {keyError && <span className="block text-warn text-[20px] mt-1.5">{keyError}</span>}
+          {keyError && <span className="block text-warn text-[15px] mt-1.5">{keyError}</span>}
         </Field>
 
         <Field
@@ -112,7 +112,7 @@ export default function ScenarioNew() {
         </Button>
         <Button variant="ghost" onClick={() => navigate("/scenarios")}>취소</Button>
       </div>
-      <p className="text-muted text-[20px] mt-3">
+      <p className="text-muted text-[15px] mt-3">
         만든 시나리오는 배포해야 동행이가 실제로 감시하기 시작합니다.
       </p>
     </>

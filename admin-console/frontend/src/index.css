@@ -17,9 +17,11 @@
 }
 
 html {
-  /* 노인 친화 기준 — ADMIN_DESIGN §3.
-     Tailwind의 여백·컨트롤 크기는 rem 기반이라 이 값이 UI 전체 밀도를 결정한다. */
-  font-size: 26px;
+  /* Tailwind의 여백·컨트롤 크기는 rem 기반이라 이 값이 UI 전체 밀도를 결정한다.
+     처음에는 노인 친화 기준으로 26px을 잡았는데, 이 화면을 보는 사람은 어르신이
+     아니라 보호자다 — 어르신은 관리 화면을 볼 일이 없다. 큰 글자가 필요한 곳은
+     동행이와 대화하는 쪽이지 여기가 아니라서, 보통 웹 밀도로 되돌린다. */
+  font-size: 17px;
 }
 
 body {
@@ -36,7 +38,7 @@ body {
 
 /* 좁은 화면에서는 기준 크기를 조금 낮춰 가로 스크롤을 막는다 */
 @media (max-width: 900px) {
-  html { font-size: 20px; }
+  html { font-size: 15px; }
 }
 
 *:focus-visible {

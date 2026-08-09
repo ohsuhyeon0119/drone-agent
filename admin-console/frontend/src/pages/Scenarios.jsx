@@ -14,8 +14,8 @@ export default function Scenarios() {
     <>
       <div className="flex flex-wrap items-start justify-between gap-4 mb-9">
         <div>
-          <h1 className="text-[49px] font-bold [text-wrap:balance]">시나리오</h1>
-          <p className="text-muted mt-2 text-[26px]">감지할 상황과 대응 지침을 관리합니다.</p>
+          <h1 className="text-[34px] font-bold [text-wrap:balance]">시나리오</h1>
+          <p className="text-muted mt-2 text-[19px]">감지할 상황과 대응 지침을 관리합니다.</p>
         </div>
         <Button variant="primary" className="flex-none"
                 onClick={() => navigate("/scenarios/new")}>
@@ -26,14 +26,14 @@ export default function Scenarios() {
         {draft.scenarios.map((s) => (
           <div
             key={s.id}
-            className="bg-surface border border-line rounded-(--radius-card) p-9 hover:border-accent transition-colors duration-150 flex flex-col gap-7 min-h-[560px]"
+            className="bg-surface border border-line rounded-(--radius-card) p-9 hover:border-accent transition-colors duration-150 flex flex-col gap-7 min-h-[380px]"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <Link to={`/scenarios/${s.id}`} className="font-bold text-[40px] hover:text-accent">
+                <Link to={`/scenarios/${s.id}`} className="font-bold text-[28px] hover:text-accent">
                   {s.name}
                 </Link>
-                <p className="text-muted text-[26px] mt-2">
+                <p className="text-muted text-[19px] mt-2">
                   지침 {s.instructions.length}개 · {s.enabled ? "감시 중" : "꺼짐"}
                 </p>
               </div>
@@ -46,10 +46,10 @@ export default function Scenarios() {
 
             <ul className="flex flex-col gap-5">
               {s.instructions.map((ins, i) => (
-                <li key={i} className="text-[28px] text-ink border-l-[3px] border-accent/50 pl-5 leading-relaxed">
+                <li key={i} className="text-[21px] text-ink border-l-[3px] border-accent/50 pl-5 leading-relaxed">
                   {ins.text}
                   {ins.action && (
-                    <span className="block mt-1.5 text-[21px] font-semibold text-accent">
+                    <span className="block mt-1.5 text-[16px] font-semibold text-accent">
                       → {actionName(ins.action)}
                     </span>
                   )}
@@ -62,17 +62,17 @@ export default function Scenarios() {
                 <span className="flex flex-wrap items-center gap-2">
                   {linkedActions(s).map((a) => (
                     <span key={a}
-                          className="inline-block text-[19px] font-semibold bg-accentsoft text-accent rounded-full px-4 py-2">
+                          className="inline-block text-[14px] font-semibold bg-accentsoft text-accent rounded-full px-4 py-2">
                       {actionName(a)}
                     </span>
                   ))}
                 </span>
               ) : (
-                <span className="text-[19px] text-muted/60">연결된 행동 없음</span>
+                <span className="text-[14px] text-muted/60">연결된 행동 없음</span>
               )}
               <Link
                 to={`/scenarios/${s.id}`}
-                className="text-accent font-semibold text-[26px] hover:underline"
+                className="text-accent font-semibold text-[19px] hover:underline"
               >
                 지침 관리 →
               </Link>

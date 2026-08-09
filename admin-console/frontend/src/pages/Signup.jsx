@@ -73,7 +73,7 @@ export default function Signup() {
             autoComplete="new-password"
           />
           {tooShort && (
-            <span className="block text-warn text-[22px] mt-1.5">
+            <span className="block text-warn text-[16px] mt-1.5">
               {MIN_PASSWORD}자 이상으로 만들어 주세요.
             </span>
           )}
@@ -88,24 +88,24 @@ export default function Signup() {
             autoComplete="new-password"
           />
           {mismatch && (
-            <span className="block text-warn text-[22px] mt-1.5">
+            <span className="block text-warn text-[16px] mt-1.5">
               비밀번호가 서로 다릅니다.
             </span>
           )}
         </Field>
 
-        {error && <p role="alert" className="text-warn text-[24px] mb-4">{error}</p>}
+        {error && <p role="alert" className="text-warn text-[18px] mb-4">{error}</p>}
 
         <Button
           variant="primary"
           type="submit"
           disabled={busy || !ready}
-          className="w-full h-16 text-[30px] mt-3"
+          className="w-full h-16 text-[22px] mt-3"
         >
           {busy ? "만드는 중…" : "가입하고 시작하기"}
         </Button>
 
-        <p className="text-muted text-[24px] mt-6 text-center">
+        <p className="text-muted text-[18px] mt-6 text-center">
           이미 계정이 있으신가요?{" "}
           <Link to="/login" className="text-accent font-bold hover:underline">로그인</Link>
         </p>

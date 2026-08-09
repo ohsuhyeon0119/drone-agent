@@ -71,16 +71,16 @@ export default function ScenarioDetail() {
 
   return (
     <>
-      <nav className="text-[24px] text-muted mb-4">
+      <nav className="text-[18px] text-muted mb-4">
         <Link to="/scenarios" className="hover:text-accent">시나리오</Link>
         <span className="mx-2">›</span>
         <span className="text-ink">{scenario.name}</span>
       </nav>
 
       <header className="flex flex-wrap items-center justify-between gap-4 mb-8">
-        <h1 className="text-[49px] font-bold">{scenario.name}</h1>
+        <h1 className="text-[34px] font-bold">{scenario.name}</h1>
         <div className="flex items-center gap-3">
-          <span className="text-[24px] text-muted">{scenario.enabled ? "감시 중" : "꺼짐"}</span>
+          <span className="text-[18px] text-muted">{scenario.enabled ? "감시 중" : "꺼짐"}</span>
           <Toggle
             checked={scenario.enabled}
             onChange={(v) => toggleScenario(scenario.id, v)}
@@ -92,12 +92,12 @@ export default function ScenarioDetail() {
       {/* 이 시나리오가 언제 발동하는지 — 지침(대응 방식)과 역할이 다르므로 위에 따로 둔다 */}
       <section className="mb-10 bg-surface border border-line rounded-(--radius-card) px-7 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
-          <h2 className="text-[32px] font-bold">감지 조건</h2>
+          <h2 className="text-[24px] font-bold">감지 조건</h2>
           <div className="flex items-center gap-3">
-            <span className="text-[22px] text-muted">몇 초마다 판단할까요</span>
+            <span className="text-[16px] text-muted">몇 초마다 판단할까요</span>
             <select
               aria-label="재판정 간격"
-              className="h-14 px-4 text-[24px] rounded-(--radius-ctl) border border-line bg-surface cursor-pointer tabular-nums"
+              className="h-14 px-4 text-[18px] rounded-(--radius-ctl) border border-line bg-surface cursor-pointer tabular-nums"
               value={scenario.cooldown ?? 10}
               onChange={(e) => setCooldown(scenario.id, Number(e.target.value))}
             >
@@ -107,7 +107,7 @@ export default function ScenarioDetail() {
             </select>
           </div>
         </div>
-        <p className="text-muted text-[22px] mb-4">
+        <p className="text-muted text-[16px] mb-4">
           이 조건에 맞으면 아래 지침대로 대응합니다. 무엇은 감지로 보지 않을지도 함께
           적을수록 오작동이 줄어듭니다.
         </p>
@@ -121,20 +121,20 @@ export default function ScenarioDetail() {
         {scenario.detectPrompt ? (
           /* 실제로 모델에 들어가는 것 중 사람이 손댈 필요 없는 부분 — 뭐가 붙는지는 보여준다 */
           <details className="mt-3">
-            <summary className="text-muted text-[20px] cursor-pointer select-none">
+            <summary className="text-muted text-[15px] cursor-pointer select-none">
               카메라에 실제로 전달되는 전체 문장 보기
             </summary>
-            <pre className="mt-2 p-4 rounded-(--radius-ctl) bg-bg border border-line text-[19px] leading-relaxed whitespace-pre-wrap font-sans text-muted">
+            <pre className="mt-2 p-4 rounded-(--radius-ctl) bg-bg border border-line text-[14px] leading-relaxed whitespace-pre-wrap font-sans text-muted">
 {scenario.detectPrompt}
 {"\n반드시 아래 JSON 형식으로만 답하라, 코드펜스 금지:\n"}
 {`{"event": "${scenario.id === "fall" ? "fall" : "taken"}" 또는 "none", "confidence": 0.0~1.0, "reason": "판단 근거를 한 문장으로"}`}
             </pre>
-            <p className="text-muted text-[19px] mt-2">
+            <p className="text-muted text-[14px] mt-2">
               답변 형식은 자동으로 붙습니다. 위 입력칸에는 조건만 쓰면 됩니다.
             </p>
           </details>
         ) : (
-          <p className="text-muted text-[20px] mt-2">
+          <p className="text-muted text-[15px] mt-2">
             비워 두면 카메라로 감지하지 않고 대화에만 반응합니다.
           </p>
         )}
@@ -143,8 +143,8 @@ export default function ScenarioDetail() {
       <section className="mb-10">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
-            <h2 className="text-[32px] font-bold">지침</h2>
-            <p className="text-muted text-[22px] mt-1">감지된 뒤 동행이가 어떻게 말하고 행동할지</p>
+            <h2 className="text-[24px] font-bold">지침</h2>
+            <p className="text-muted text-[16px] mt-1">감지된 뒤 동행이가 어떻게 말하고 행동할지</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => { setText(""); setEditIdx(null); setModal("text"); }}>지침 추가</Button>
@@ -167,7 +167,7 @@ export default function ScenarioDetail() {
                 className="bg-surface border border-line rounded-(--radius-card) border-l-4 border-l-accent px-7 py-6"
               >
                 <div className="flex items-start gap-4">
-                  <p className="flex-1 text-[28px] leading-relaxed">{ins.text}</p>
+                  <p className="flex-1 text-[21px] leading-relaxed">{ins.text}</p>
                   <div className="flex flex-none gap-1">
                     <button
                       aria-label="지침 수정"
@@ -192,10 +192,10 @@ export default function ScenarioDetail() {
 
                 {/* 모든 지침에 행동이 붙을 필요는 없다 — 말하는 방식에 대한 지침이 대부분이다 */}
                 <div className="flex flex-wrap items-center gap-3 mt-4 pt-4 border-t border-line/70">
-                  <span className="text-[22px] text-muted">이때 실행할 행동</span>
+                  <span className="text-[16px] text-muted">이때 실행할 행동</span>
                   <select
                     aria-label={`지침 ${i + 1}의 행동`}
-                    className="h-14 px-4 text-[24px] rounded-(--radius-ctl) border border-line bg-surface cursor-pointer"
+                    className="h-14 px-4 text-[18px] rounded-(--radius-ctl) border border-line bg-surface cursor-pointer"
                     value={ins.action || ""}
                     onChange={(e) => setInstructionAction(scenario.id, i, e.target.value)}
                   >
@@ -206,7 +206,7 @@ export default function ScenarioDetail() {
                   </select>
                   {ins.action && (
                     <Link to={`/actions/${ins.action}`}
-                          className="text-accent font-semibold text-[22px] hover:underline">
+                          className="text-accent font-semibold text-[16px] hover:underline">
                       연락 대상·설정 보기 →
                     </Link>
                   )}
@@ -218,7 +218,7 @@ export default function ScenarioDetail() {
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-3 mt-10 pt-8 border-t border-line">
-        <div className="text-muted text-[22px]">
+        <div className="text-muted text-[16px]">
           {changes.length > 0
             ? `수정 ${changes.length}건이 저장되어 있습니다. 배포해야 동행이에게 적용됩니다.`
             : "변경 사항이 없습니다."}
@@ -254,7 +254,7 @@ export default function ScenarioDetail() {
                 {listening ? "듣고 있어요… 말씀해 주세요" : "누르고 말하기"}
               </Button>
             ) : (
-              <p className="text-muted text-[24px]">
+              <p className="text-muted text-[18px]">
                 이 브라우저는 음성 입력을 지원하지 않아요. 아래에 직접 입력해 주세요.
               </p>
             )}
@@ -266,7 +266,7 @@ export default function ScenarioDetail() {
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
-        <p className="text-[20px] text-muted mt-2 mb-5">
+        <p className="text-[15px] text-muted mt-2 mb-5">
           등록한 지침은 배포 전까지 적용되지 않습니다.
         </p>
         <div className="flex justify-end gap-2">

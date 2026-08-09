@@ -51,7 +51,7 @@ export default function Contacts() {
             onChange={(e) => setForm({ ...form, phone: e.target.value })}
           />
         </div>
-        {error && <p role="alert" className="text-warn text-[24px] mb-3">{error}</p>}
+        {error && <p role="alert" className="text-warn text-[18px] mb-3">{error}</p>}
         <Button variant="primary" type="submit" disabled={!form.name.trim() || !form.phone.trim()}>
           연락처 등록
         </Button>
@@ -67,15 +67,15 @@ export default function Contacts() {
               className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-surface border border-line rounded-(--radius-card) px-6 py-5"
             >
               <span
-                className={`flex-none w-16 text-center text-[20px] font-bold rounded-full px-2 py-1
+                className={`flex-none w-16 text-center text-[15px] font-bold rounded-full px-2 py-1
                   ${i === 0 ? "bg-accentsoft text-accent" : "bg-bg text-muted"}`}
               >
                 {i + 1}순위
               </span>
-              <div className="flex-1 min-w-[140px]">
-                <span className="font-bold text-[28px]">{c.name}</span>
-                <span className="text-muted text-[24px]"> · {c.relation}</span>
-                <div className="text-ink/75 text-[26px] tabular-nums">{c.phone}</div>
+              <div className="flex-1 min-w-[96px]">
+                <span className="font-bold text-[21px]">{c.name}</span>
+                <span className="text-muted text-[18px]"> · {c.relation}</span>
+                <div className="text-ink/75 text-[19px] tabular-nums">{c.phone}</div>
               </div>
               <div className="flex gap-1">
                 <button
