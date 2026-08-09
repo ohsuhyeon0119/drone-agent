@@ -470,6 +470,16 @@ def list_versions(agent_id: int = DEFAULT_AGENT_ID) -> list[dict]:
     } for r in rows]
 
 
+def version_config(version: int, agent_id: int = DEFAULT_AGENT_ID) -> dict | None:
+    """특정 버전의 설정 스냅샷. 없으면 None."""
+    with closing(_connect()) as conn:
+        row = conn.execute(
+            "SELECT config_json FROM config_versions WHERE agent_id=? AND version=?",
+            (agent_id, version),
+        ).fetchone()
+    return json.loads(row["config_json"]) if row else None
+
+
 def save_draft(bundle: dict, by: str | None = None, agent_id: int = DEFAULT_AGENT_ID):
     with closing(_connect()) as conn, conn:
         conn.execute(

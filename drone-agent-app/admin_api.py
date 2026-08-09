@@ -113,6 +113,24 @@ async def publish(user: dict = Depends(require_auth)):
     return result
 
 
+@router.get("/versions/{version}")
+async def get_version(version: int, user: dict = Depends(require_auth)):
+    """특정 배포 버전의 설정 내용.
+
+    목록(list_versions)은 변경 요약만 주므로, "이 버전을 편집 상태로 불러오기"를
+    하려면 내용을 따로 가져와야 한다.
+    """
+    for v in admin_store.list_versions(user["agent_id"]):
+        if v["version"] == version:
+            break
+    else:
+        raise HTTPException(status_code=404, detail="없는 버전입니다.")
+    config = admin_store.version_config(version, user["agent_id"])
+    if config is None:
+        raise HTTPException(status_code=404, detail="없는 버전입니다.")
+    return {"version": version, "config": config}
+
+
 @router.post("/rollback/{version}")
 async def rollback(version: int, user: dict = Depends(require_auth)):
     result = admin_store.rollback(version, by=user["email"], agent_id=user["agent_id"])

@@ -82,7 +82,7 @@ function IconMenu() {
 export default function Layout() {
   const [open, setOpen] = useState(true); // 데스크톱: 접힘/펼침
   const [mobileOpen, setMobileOpen] = useState(false); // 모바일: 오버레이
-  const { live, changes } = useStore();
+  const { live, changes, ready, error, saving } = useStore();
   const { logout, user } = useAuth();
   const navigate = useNavigate();
 
@@ -134,19 +134,30 @@ export default function Layout() {
           navigate={navigate}
           logout={logout}
           user={user}
+          saving={saving}
         />
       </aside>
 
       <main className="flex-1 min-w-0">
         <div className="w-full px-4 sm:px-10 py-6 sm:py-12">
-          <Outlet />
+          {/* 설정을 서버에서 받아오기 전에 화면을 그리면 "시나리오 없음"이 잠깐
+              보였다가 채워진다 — 지운 줄 알고 다시 만들게 된다. */}
+          {ready ? <Outlet /> : (
+            <p className="text-muted text-[26px] py-10">설정을 불러오는 중…</p>
+          )}
+          {error && (
+            <p role="alert"
+               className="mt-6 text-warn text-[24px] bg-warnsoft border border-warn/30 rounded-(--radius-card) px-6 py-4">
+              {error}
+            </p>
+          )}
         </div>
       </main>
     </div>
   );
 }
 
-function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, logout, user }) {
+function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, logout, user, saving }) {
   // 모바일 오버레이는 항상 펼친 폭(w-64)이므로 라벨을 항상 보여준다.
   // md 미만에서는 open 상태와 무관하게 라벨 표시 — CSS로 제어.
   const labelCls = open ? "" : "md:hidden";
@@ -232,7 +243,9 @@ function SidebarContent({ open, setOpen, closeMobile, live, changes, navigate, l
           ${open ? "" : "md:px-0 md:flex md:justify-center"}`}
       >
         <span className={labelCls}>
-          <span className="block text-[20px] tracking-wide text-muted">현재 적용 버전</span>
+          <span className="block text-[20px] tracking-wide text-muted">
+            현재 적용 버전{saving && <span className="ml-2">저장 중…</span>}
+          </span>
           <span className="font-bold tabular-nums text-[26px]">
             Live v{live.version}
             {changes.length > 0 && (

@@ -6,6 +6,7 @@ export default function Deploy() {
   const { live, changes, versions, publish, rollback, rollbackNow } = useStore();
   const [confirm, setConfirm] = useState(false);
   const [rollbackTo, setRollbackTo] = useState(null);
+  const [busy, setBusy] = useState(false);
   const nextVersion = live.version + 1;
 
   return (
@@ -80,7 +81,9 @@ export default function Deploy() {
                     {v.changes.length > 2 && <div>외 {v.changes.length - 2}건</div>}
                   </td>
                   <td className="px-7 py-7 whitespace-nowrap text-right">
-                    {v.version !== live.version && v.config && (
+                    {/* 목록에는 변경 요약만 온다. 설정 내용은 롤백을 고른 뒤
+                        서버에서 따로 가져온다. */}
+                    {v.version !== live.version && (
                       <Button
                         onClick={() => setRollbackTo(v.version)}
                         className="h-14 px-5 text-[24px]"
@@ -101,9 +104,12 @@ export default function Deploy() {
           배포 즉시 에이전트가 새 지침대로 동작합니다. 변경 {changes.length}건이 적용됩니다.
         </p>
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setConfirm(false)}>취소</Button>
-          <Button variant="primary" onClick={() => { publish(); setConfirm(false); }}>
-            배포하기
+          <Button variant="ghost" onClick={() => setConfirm(false)} disabled={busy}>취소</Button>
+          {/* 배포는 서버 왕복이라 시간이 걸린다. 끝나기 전에 창을 닫으면 성공했는지
+              실패했는지 모른 채 넘어가므로, 끝날 때까지 열어두고 상태를 보여준다. */}
+          <Button variant="primary" disabled={busy}
+                  onClick={async () => { setBusy(true); await publish(); setBusy(false); setConfirm(false); }}>
+            {busy ? "배포 중…" : "배포하기"}
           </Button>
         </div>
       </Modal>
@@ -125,9 +131,12 @@ export default function Deploy() {
             <Button
               variant="primary"
               className="mt-4 w-full"
-              onClick={() => { rollbackNow(rollbackTo); setRollbackTo(null); }}
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true); await rollbackNow(rollbackTo); setBusy(false); setRollbackTo(null);
+              }}
             >
-              지금 롤백하고 배포
+              {busy ? "롤백 중…" : "지금 롤백하고 배포"}
             </Button>
           </div>
           <div className="border border-line rounded-(--radius-card) p-5">

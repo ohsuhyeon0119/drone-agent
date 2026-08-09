@@ -1,143 +1,115 @@
-/* 목데이터 스토어 — 백엔드(FastAPI) 연결 전까지 localStorage에 저장.
-   API 연결 시 이 파일의 함수 시그니처를 그대로 fetch로 교체하면 된다. */
-import { createContext, useContext, useEffect, useState } from "react";
+/* 에이전트 설정 저장소 — 서버(FastAPI /api/admin)가 진실의 원천이다.
+   예전에는 localStorage에만 저장해서, 화면에서 고치고 "배포됨"이 떠도 동행이는
+   아무것도 몰랐다. 실패보다 나쁜 상태였다 — 성공했다고 말하니까.
 
-const SEED = {
-  scenarios: [
-    {
-      id: "fall",
-      name: "낙상 감지",
-      enabled: true,
-      detectPrompt: "이 이미지를 보고 사람이 엎드려 있거나 넘어져 있는지 감지하라.",
-      cooldown: 10,
-      instructions: [
-        { text: "쓰러짐이 감지되면 즉시 걱정스러운 톤으로 “괜찮으세요?”라고 물어봅니다." },
-        { text: "괜찮지 않다고 답하시거나 응답이 없으면 보호자에게 알립니다.",
-          action: "notify_caregiver" },
-        { text: "명확히 괜찮다고 답하시면 알리지 않고 안심시키는 말로 마무리합니다." },
-      ],
-    },
-    {
-      id: "medication",
-      name: "약 복용 확인",
-      enabled: true,
-      detectPrompt:
-        "이 이미지를 보고 사람이 알약, 약봉투, 약통, 물컵을 손에 들고 있거나 " +
-        "입 근처로 가져가 약을 복용하는 동작을 하고 있는지 감지하라.",
-      cooldown: 15,
-      instructions: [
-        { text: "복약 시간이 되면 먼저 다정하게 말을 걸어 복용을 권합니다." },
-        { text: "약을 복용하는 모습이 확인되면 따뜻하게 칭찬합니다." },
-        { text: "아직 안 드셨다고 하시면 부드럽게 다시 권유하고 재차 확인합니다." },
-        { text: "어르신이 약을 드셨다고 말씀하시면 기록을 남깁니다.",
-          action: "record_medication" },
-      ],
-    },
-    {
-      id: "task",
-      name: "키오스크·일 처리 도움",
-      enabled: true,
-      detectPrompt: "",
-      cooldown: 10,
-      instructions: [
-        { text: "화면이나 눈앞의 물건에 대해 물어보면 쉬운 말로 한 단계씩 설명합니다." },
-        { text: "어려운 용어는 피하고, 필요하면 되물어 정확히 확인한 뒤 안내합니다." },
-      ],
-    },
-  ],
-  actions: [
-    {
-      id: "notify_caregiver",
-      name: "보호자 알림",
-      description: "낙상 등 위급 상황이 감지되어 보호자에게 알려야 할 때",
-      params: [
-        { name: "상황 종류", type: "글", desc: "감지된 상황의 종류" },
-        { name: "전달 내용", type: "글", desc: "보호자에게 전달할 요약" },
-      ],
-      kind: "builtin",
-      needsContacts: true,
-      notifyContactIds: [],
-    },
-    {
-      id: "record_medication",
-      name: "복약 기록",
-      description: "어르신이 약을 드셨다고 말씀하셨을 때 기록을 남깁니다. 카메라로 이미 확인된 경우에는 호출하지 않습니다.",
-      params: [{ name: "기록 내용", type: "글", desc: "남길 내용" }],
-      kind: "builtin",
-    },
-  ],
-  contacts: [],
-  alertRule: { scenario: "fall", waitSeconds: 30, notifyRank: 1 },
-};
+   편집은 화면에서 즉시 반영하고(낙관적), 잠시 뒤 서버에 draft로 저장한다.
+   글자를 칠 때마다 요청을 보내면 타이핑이 끊긴다.
 
-const STORAGE_KEY = "donghaeng-console-v1";
+   서버 번들은 snake_case(detect_prompt, notify_contact_ids), 화면은
+   camelCase를 쓴다. 여기서만 변환하고, 화면 코드는 몰라도 되게 한다. */
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { getConfig, getVersion, publishConfig, putDraft, rollbackTo } from "./api.js";
+import { useAuth } from "./auth.jsx";
+
+const EMPTY = { scenarios: [], actions: [], contacts: [] };
+const SAVE_DELAY = 700;
 
 function clone(x) {
   return JSON.parse(JSON.stringify(x));
 }
 
-/* 저장된 설정에 시드의 새 필드를 채워 넣는다.
-   화면에 항목을 추가할 때마다 예전에 저장된 브라우저에서는 그 항목이 통째로
-   사라져 보이는 문제를 막기 위함 (사용자가 입력한 값은 그대로 둔다). */
-function normalizeInstructions(list) {
-  return (list || []).map((x) =>
-    typeof x === "string" ? { text: x, action: null } : { text: x.text, action: x.action || null },
-  );
-}
-
-function withSeedDefaults(config) {
-  if (!config || typeof config !== "object") return clone(SEED);
-  const merged = { ...clone(SEED), ...config };
-  const seedScen = Object.fromEntries(SEED.scenarios.map((s) => [s.id, s]));
-  merged.scenarios = (config.scenarios || SEED.scenarios).map((s) => {
-    const m = { ...(seedScen[s.id] || {}), ...s };
-    m.instructions = normalizeInstructions(m.instructions);
-    // 예전에는 행동이 시나리오에 붙어 있었다 — 남아 있으면 지침 쪽으로 옮긴다
-    if (m.onDetect && !m.instructions.some((x) => x.action)) {
-      const last = m.instructions[m.instructions.length - 1];
-      if (last) last.action = m.onDetect;
-    }
-    delete m.onDetect;
-    delete m.notifyContactIds;
-    return m;
-  });
-  const seedAct = Object.fromEntries(SEED.actions.map((a) => [a.id, a]));
-  merged.actions = (config.actions || SEED.actions).map((a) => ({
-    ...(seedAct[a.id] || {}), ...a,
-  }));
-  merged.contacts = config.contacts || [];
-  return merged;
-}
-
-function initialState() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) {
-    try {
-      const st = JSON.parse(saved);
-      return {
-        ...st,
-        draft: withSeedDefaults(st.draft),
-        live: { ...st.live, config: withSeedDefaults(st.live?.config) },
-      };
-    } catch { /* 손상 시 초기화 */ }
-  }
+/* ── 서버 ↔ 화면 형식 변환 ──────────────────────────────────
+   화면이 다루지 않는 값(min_confidence, nudge_template, target_event)은
+   _server에 그대로 담아 두었다가 되돌려준다. 빠뜨리면 화면에서 한 번 배포하는
+   것만으로 튜닝해둔 감지 기준이 기본값으로 되돌아간다. */
+function scenarioToClient(s) {
   return {
-    draft: clone(SEED),
-    live: { version: 1, publishedAt: "2026-08-05 21:00", config: clone(SEED) },
-    versions: [
-      { version: 1, publishedAt: "2026-08-05 21:00", changes: ["초기 설정"], config: clone(SEED) },
-    ],
+    id: s.key,
+    name: s.name,
+    enabled: s.enabled !== false,
+    detectPrompt: s.detect_prompt || "",
+    cooldown: s.cooldown ?? 10,
+    instructions: (s.instructions || []).map((x) => ({ text: x.text, action: x.action || null })),
+    _server: s,
   };
 }
 
-/* draft ↔ live의 사람이 읽는 변경 목록 — 배포 화면의 주인공 */
+function scenarioToServer(s) {
+  return {
+    ...(s._server || { target_event: "event", min_confidence: 0.7, nudge_template: "" }),
+    key: s.id,
+    name: s.name,
+    enabled: !!s.enabled,
+    detect_prompt: s.detectPrompt || "",
+    cooldown: Number(s.cooldown ?? 10),
+    instructions: (s.instructions || []).map((x) =>
+      x.action ? { text: x.text, action: x.action } : { text: x.text }),
+  };
+}
+
+function actionToClient(a) {
+  return {
+    id: a.id,
+    name: a.name,
+    description: a.description || "",
+    params: a.params || [],
+    kind: a.kind || "builtin",
+    url: a.url || "",
+    needsContacts: !!a.needs_contacts,
+    notifyContactIds: a.notify_contact_ids || [],
+    _server: a,
+  };
+}
+
+function actionToServer(a) {
+  return {
+    ...(a._server || {}),
+    id: a.id,
+    name: a.name,
+    description: a.description || "",
+    params: a.params || [],
+    kind: a.kind || "builtin",
+    ...(a.url ? { url: a.url } : {}),
+    needs_contacts: !!a.needsContacts,
+    notify_contact_ids: a.notifyContactIds || [],
+  };
+}
+
+function toClient(bundle) {
+  if (!bundle) return clone(EMPTY);
+  return {
+    scenarios: (bundle.scenarios || []).map(scenarioToClient),
+    actions: (bundle.actions || []).map(actionToClient),
+    contacts: (bundle.contacts || []).map((c) => ({ ...c })),
+  };
+}
+
+function toServer(draft) {
+  return {
+    scenarios: (draft.scenarios || []).map(scenarioToServer),
+    actions: (draft.actions || []).map(actionToServer),
+    contacts: (draft.contacts || []).map((c) => ({ ...c })),
+  };
+}
+
+/* 서버 변경 목록은 {text, tier} — tier는 "즉시 반영"인지 "다음 대화부터"인지다.
+   화면은 문장만 쓰므로 여기서 문자열로 편다. */
+function changeTexts(list) {
+  return (list || []).map((c) => (typeof c === "string" ? c : c.text));
+}
+
+/* draft ↔ live의 사람이 읽는 변경 목록.
+   서버도 배포할 때 같은 계산을 하지만, 화면 배지가 타이핑 즉시 반응해야 해서
+   여기서도 계산한다(서버 응답을 기다리면 한 박자 늦게 뜬다). */
 export function computeChanges(draft, liveConfig) {
+  if (!draft || !liveConfig) return [];
   const changes = [];
-  const liveScen = Object.fromEntries(liveConfig.scenarios.map((s) => [s.id, s]));
-  for (const s of draft.scenarios) {
+  const liveScen = Object.fromEntries((liveConfig.scenarios || []).map((s) => [s.id, s]));
+  for (const s of draft.scenarios || []) {
     const ls = liveScen[s.id];
     if (!ls) { changes.push(`시나리오 추가됨 — ${s.name}`); continue; }
     if (s.enabled !== ls.enabled) changes.push(`${s.name} ${s.enabled ? "켜짐" : "꺼짐"}`);
+    if (s.name !== ls.name) changes.push(`시나리오 이름 변경됨 — ${ls.name} → ${s.name}`);
     const actName = (aid) => (draft.actions.find((a) => a.id === aid) || {}).name || aid;
     const dIns = Object.fromEntries((s.instructions || []).map((x) => [x.text, x]));
     const lIns = Object.fromEntries((ls.instructions || []).map((x) => [x.text, x]));
@@ -149,14 +121,19 @@ export function computeChanges(draft, liveConfig) {
     for (const text of Object.keys(lIns))
       if (!(text in dIns)) changes.push(`지침 삭제됨 (${s.name}) — “${text}”`);
     if ((s.detectPrompt || "") !== (ls.detectPrompt || ""))
-      changes.push(`${s.name} 감지 기준 변경됨`);
+      changes.push(`${s.name} 감지 조건 변경됨`);
     if (Number(s.cooldown) !== Number(ls.cooldown))
       changes.push(`${s.name} 재판정 간격 ${s.cooldown}초로 변경됨`);
   }
-  const liveAct = Object.fromEntries(liveConfig.actions.map((a) => [a.id, a]));
+  for (const s of liveConfig.scenarios || [])
+    if (!(draft.scenarios || []).some((d) => d.id === s.id))
+      changes.push(`시나리오 삭제됨 — ${s.name}`);
+
+  const liveAct = Object.fromEntries((liveConfig.actions || []).map((a) => [a.id, a]));
   const cname = (ids) => (ids || []).map((id) =>
-    (draft.contacts.find((c) => c.id === id) || liveConfig.contacts.find((c) => c.id === id) || {}).name || "?");
-  for (const a of draft.actions) {
+    ((draft.contacts || []).find((c) => c.id === id)
+      || (liveConfig.contacts || []).find((c) => c.id === id) || {}).name || "?");
+  for (const a of draft.actions || []) {
     if (!liveAct[a.id]) { changes.push(`행동 추가됨 — ${a.name}`); continue; }
     const la = liveAct[a.id];
     if (a.name !== la.name || a.description !== la.description)
@@ -165,45 +142,116 @@ export function computeChanges(draft, liveConfig) {
     const y = cname(la.notifyContactIds).join(", ");
     if (x !== y) changes.push(`${a.name} 연락 대상 변경됨 — ${x || "없음"}`);
   }
-  for (const a of liveConfig.actions)
-    if (!draft.actions.some((d) => d.id === a.id)) changes.push(`행동 삭제됨 — ${a.name}`);
+  for (const a of liveConfig.actions || [])
+    if (!(draft.actions || []).some((d) => d.id === a.id)) changes.push(`행동 삭제됨 — ${a.name}`);
 
-  const liveCt = Object.fromEntries(liveConfig.contacts.map((c) => [c.id, c]));
-  for (const c of draft.contacts)
+  const liveCt = Object.fromEntries((liveConfig.contacts || []).map((c) => [c.id, c]));
+  for (const c of draft.contacts || [])
     if (!liveCt[c.id]) changes.push(`연락처 등록됨 — ${c.name} (${c.relation})`);
-  for (const c of liveConfig.contacts)
-    if (!draft.contacts.some((d) => d.id === c.id)) changes.push(`연락처 삭제됨 — ${c.name}`);
-  const draftIds = draft.contacts.map((c) => c.id).join(",");
-  const liveIds = liveConfig.contacts.map((c) => c.id).join(",");
+  for (const c of liveConfig.contacts || [])
+    if (!(draft.contacts || []).some((d) => d.id === c.id)) changes.push(`연락처 삭제됨 — ${c.name}`);
+  const draftIds = (draft.contacts || []).map((c) => c.id).join(",");
+  const liveIds = (liveConfig.contacts || []).map((c) => c.id).join(",");
   if (draftIds !== liveIds && !changes.some((c) => c.startsWith("연락처")))
     changes.push("연락처 우선순위 변경됨");
-
-  if (JSON.stringify(draft.alertRule) !== JSON.stringify(liveConfig.alertRule))
-    changes.push("알림 규칙 변경됨");
   return changes;
 }
 
 const StoreCtx = createContext(null);
 
 export function StoreProvider({ children }) {
-  const [state, setState] = useState(initialState);
+  const { status } = useAuth();
+  const [draft, setDraft] = useState(() => clone(EMPTY));
+  const [live, setLive] = useState({ version: 0, publishedAt: "", config: clone(EMPTY) });
+  const [versions, setVersions] = useState([]);
+  const [ready, setReady] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const timer = useRef(null);
+  const pending = useRef(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await getConfig();
+      setDraft(toClient(data.draft));
+
+      /* /config는 배포된 설정의 요약(버전·시각)만 준다. 변경 목록을 화면에서
+         계산하려면 배포된 내용 자체가 필요하므로 현재 버전을 따로 가져온다. */
+      const version = data.live?.version ?? 0;
+      let liveConfig = clone(EMPTY);
+      if (version) {
+        try {
+          liveConfig = toClient((await getVersion(version)).config);
+        } catch {
+          /* 내용을 못 가져와도 화면은 열어둔다. 변경 목록이 과하게 표시될 뿐이다. */
+        }
+      }
+      setLive({ version, publishedAt: data.live?.published_at || "", config: liveConfig });
+      setVersions((data.versions || []).map((v) => ({
+        version: v.version,
+        publishedAt: v.published_at,
+        changes: changeTexts(v.changes),
+        rolledBackFrom: v.rolled_back_from,
+      })));
+      setReady(true);
+      setError("");
+    } catch (e) {
+      setError(e.message);
+      setReady(true); // 화면은 열어두고 오류를 보여준다 — 빈 화면보다 낫다
+    }
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+    if (status === "ok") load();
+    if (status === "no") { setReady(false); setDraft(clone(EMPTY)); }
+  }, [status, load]);
+
+  /* 편집을 서버에 저장한다. 타이핑 중에는 미뤘다가 잠잠해지면 한 번 보낸다. */
+  const scheduleSave = useCallback((next) => {
+    pending.current = next;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      const bundle = pending.current;
+      pending.current = null;
+      setSaving(true);
+      try {
+        await putDraft(toServer(bundle));
+        setError("");
+      } catch (e) {
+        setError(`저장하지 못했습니다 — ${e.message}`);
+      } finally {
+        setSaving(false);
+      }
+    }, SAVE_DELAY);
+  }, []);
+
+  /* 배포처럼 저장이 반영돼야 하는 동작 전에는 밀린 것을 먼저 보낸다 */
+  const flush = useCallback(async () => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    if (!pending.current) return;
+    const bundle = pending.current;
+    pending.current = null;
+    await putDraft(toServer(bundle));
+  }, []);
 
   const update = (fn) =>
-    setState((prev) => {
+    setDraft((prev) => {
       const next = clone(prev);
-      fn(next.draft);
+      fn(next);
+      scheduleSave(next);
       return next;
     });
 
   const api = {
-    draft: state.draft,
-    live: state.live,
-    versions: state.versions,
-    changes: computeChanges(state.draft, state.live.config),
+    ready,
+    saving,
+    error,
+    draft,
+    live,
+    versions,
+    changes: computeChanges(draft, live.config),
+    reload: load,
 
     addScenario: (sc) =>
       update((d) => {
@@ -282,55 +330,43 @@ export function StoreProvider({ children }) {
         if (j < 0 || j >= d.contacts.length) return;
         [d.contacts[i], d.contacts[j]] = [d.contacts[j], d.contacts[i]];
       }),
-    setAlertRule: (rule) => update((d) => { d.alertRule = rule; }),
 
-    publish: () =>
-      setState((prev) => {
-        const changes = computeChanges(prev.draft, prev.live.config);
-        const version = prev.live.version + 1;
-        const publishedAt = new Date().toLocaleString("ko-KR", {
-          year: "numeric", month: "2-digit", day: "2-digit",
-          hour: "2-digit", minute: "2-digit", hour12: false,
-        });
-        return {
-          draft: clone(prev.draft),
-          live: { version, publishedAt, config: clone(prev.draft) },
-          versions: [...prev.versions, { version, publishedAt, changes: changes.length ? changes : ["변경 없음"], config: clone(prev.draft) }],
-        };
-      }),
+    publish: async () => {
+      setError("");
+      try {
+        await flush();
+        await publishConfig();
+        await load();
+      } catch (e) {
+        /* 검증 실패는 detail.errors로 온다. 무엇이 잘못됐는지 그대로 보여준다 —
+           "배포 실패"만 띄우면 무엇을 고쳐야 할지 알 수 없다. */
+        setError(`배포하지 못했습니다 — ${e.message}`);
+      }
+    },
+
     /* 편집 상태로만 불러오기 (확인 후 직접 배포) */
-    rollback: (version) =>
-      setState((prev) => {
-        const snap = prev.versions.find((v) => v.version === version);
-        if (!snap || !snap.config) return prev;
-        return { ...prev, draft: clone(snap.config) };
-      }),
+    rollback: async (version) => {
+      try {
+        const v = await getVersion(version);
+        const next = toClient(v.config);
+        setDraft(next);
+        scheduleSave(next);
+      } catch (e) {
+        setError(e.message);
+      }
+    },
 
     /* 즉시 롤백 — 해당 버전 설정을 새 버전으로 바로 배포 */
-    rollbackNow: (version) =>
-      setState((prev) => {
-        const snap = prev.versions.find((v) => v.version === version);
-        if (!snap || !snap.config) return prev;
-        const newVersion = prev.live.version + 1;
-        const publishedAt = new Date().toLocaleString("ko-KR", {
-          year: "numeric", month: "2-digit", day: "2-digit",
-          hour: "2-digit", minute: "2-digit", hour12: false,
-        });
-        return {
-          draft: clone(snap.config),
-          live: { version: newVersion, publishedAt, config: clone(snap.config) },
-          versions: [
-            ...prev.versions,
-            {
-              version: newVersion,
-              publishedAt,
-              changes: [`v${version} 설정으로 롤백`],
-              config: clone(snap.config),
-              rolledBackFrom: version,
-            },
-          ],
-        };
-      }),
+    rollbackNow: async (version) => {
+      setError("");
+      try {
+        await flush();
+        await rollbackTo(version);
+        await load();
+      } catch (e) {
+        setError(`롤백하지 못했습니다 — ${e.message}`);
+      }
+    },
   };
 
   return <StoreCtx.Provider value={api}>{children}</StoreCtx.Provider>;

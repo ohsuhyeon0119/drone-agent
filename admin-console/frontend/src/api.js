@@ -65,6 +65,12 @@ export async function signup(email, password, name) {
 /** 토큰이 아직 유효한지 서버에 물어본다. 화면을 그리기 전 관문. */
 export const me = () => request("/me");
 
+export const getConfig = () => request("/config");
+export const putDraft = (config) => request("/draft", { method: "PUT", body: { config } });
+export const publishConfig = () => request("/publish", { method: "POST" });
+export const rollbackTo = (version) => request(`/rollback/${version}`, { method: "POST" });
+export const getVersion = (version) => request(`/versions/${version}`);
+
 export const getProfile = () => request("/profile");
 export const putProfile = (profile) => request("/profile", { method: "PUT", body: { profile } });
 
