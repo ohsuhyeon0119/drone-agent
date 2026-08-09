@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getToken } from "../api.js";
+import { useAuth } from "../auth.jsx";
+import { useLocalDevice } from "../useLocalDevice.js";
 
 /* 카메라가 보고 있는 화면과 그 사이 일어난 일을 함께 본다.
    읽기 전용이다 — 이 화면을 열어둔 것이 어르신과의 대화에 영향을 주지 않는다. */
@@ -64,19 +66,50 @@ export default function Monitor() {
   const [log, setLog] = useState([]);
   const [frameUrl, setFrameUrl] = useState("");
   const frameUrlRef = useRef("");
+  /* 어디를 카메라로 쓸지. 휴대폰이 기본이고, 노트북은 기기가 없을 때
+     관리 화면만으로 전체 동작을 확인하기 위한 것이다. */
+  const [source, setSource] = useState("phone");
+  const { user } = useAuth();
+  const laptop = useLocalDevice({ agentId: user?.agentId, withAudio: true });
+
+  const switchSource = (next) => {
+    if (next === source) return;
+    // 두 곳에서 동시에 보내면 프레임이 뒤섞인다 — 옮길 때 반드시 먼저 끈다
+    if (source === "laptop") laptop.stop();
+    setSource(next);
+  };
 
   useEffect(() => {
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(
-      `${proto}//${location.host}/ws/monitor?token=${encodeURIComponent(getToken())}`
-    );
-    ws.binaryType = "blob";
+    /* 서버가 재시작되거나 잠깐 끊겨도 화면이 죽은 채로 남지 않게 다시 붙는다.
+       모니터링은 켜두고 보는 화면이라, 한 번 끊겼다고 새로고침을 요구하면
+       정작 봐야 할 순간을 놓친다. */
+    let ws = null;
+    let retry = null;
+    let closed = false;
+    let delay = 1000;
 
-    ws.onopen = () => setLinkState("open");
-    ws.onclose = () => setLinkState("closed");
-    ws.onerror = () => setLinkState("closed");
+    const connect = () => {
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      ws = new WebSocket(
+        `${proto}//${location.host}/ws/monitor?token=${encodeURIComponent(getToken())}`
+      );
+      ws.binaryType = "blob";
 
-    ws.onmessage = (msg) => {
+      ws.onopen = () => { setLinkState("open"); delay = 1000; };
+      const reconnect = () => {
+        if (closed) return;
+        setLinkState("closed");
+        // 서버가 죽어 있을 때 초당 한 번씩 두드리지 않도록 간격을 늘린다
+        retry = setTimeout(connect, delay);
+        delay = Math.min(delay * 2, 10000);
+      };
+      ws.onclose = reconnect;
+      ws.onerror = () => { try { ws.close(); } catch { /* 이미 닫힘 */ } };
+
+      ws.onmessage = onMessage;
+    };
+
+    const onMessage = (msg) => {
       // 영상은 바이너리, 나머지는 JSON — 프레임을 base64로 감싸면 33% 커진다
       if (msg.data instanceof Blob) {
         const url = URL.createObjectURL(msg.data);
@@ -100,8 +133,11 @@ export default function Monitor() {
       }
     };
 
+    connect();
     return () => {
-      ws.close();
+      closed = true;
+      if (retry) clearTimeout(retry);
+      if (ws) ws.close();
       if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
     };
   }, []);
@@ -118,16 +154,32 @@ export default function Monitor() {
         <StatusPill connected={status.connected} link={linkState} />
       </header>
 
+      <SourcePicker source={source} onChange={switchSource} laptop={laptop} />
+
       <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-6 items-start">
         <section className="bg-ink rounded-(--radius-card) overflow-hidden">
-          <div className="aspect-video w-full flex items-center justify-center">
-            {frameUrl ? (
+          <div className="aspect-video w-full flex items-center justify-center relative">
+            {/* 노트북일 때는 내 화면을 그대로 보여준다 — 서버를 한 바퀴 돌아온
+                초당 2장짜리보다 훨씬 부드럽고, 각도를 맞추기도 쉽다. */}
+            <video
+              ref={laptop.videoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-contain ${source === "laptop" ? "" : "hidden"}`}
+            />
+            {source === "phone" && (frameUrl ? (
               <img src={frameUrl} alt="카메라 화면" className="w-full h-full object-contain" />
             ) : (
               <p className="text-white/55 text-[24px] text-center px-8">
                 {status.connected
                   ? "영상이 아직 들어오지 않았습니다."
-                  : "기기가 연결되면 여기에 화면이 보입니다."}
+                  : "휴대폰이 연결되면 여기에 화면이 보입니다."}
+              </p>
+            ))}
+            {source === "laptop" && laptop.state !== "live" && (
+              <p className="absolute text-white/55 text-[24px] text-center px-8">
+                {laptop.state === "starting" ? "카메라를 켜는 중…" : "‘시작’을 누르면 이 화면이 동행이에게 전달됩니다."}
               </p>
             )}
           </div>
@@ -158,6 +210,69 @@ export default function Monitor() {
         </section>
       </div>
     </>
+  );
+}
+
+const SOURCES = [
+  { key: "laptop", label: "내 노트북", desc: "이 컴퓨터의 카메라와 마이크로 직접 대화합니다" },
+  { key: "phone", label: "연결된 휴대폰", desc: "휴대폰이 보내는 화면을 지켜봅니다" },
+];
+
+function SourcePicker({ source, onChange, laptop }) {
+  return (
+    <section className="mb-6 bg-surface border border-line rounded-(--radius-card) px-6 py-5">
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
+        <span className="text-[24px] font-bold">카메라</span>
+        <div className="flex flex-wrap gap-3">
+          {SOURCES.map((s, i) => (
+            <button
+              key={s.key}
+              onClick={() => onChange(s.key)}
+              title={s.desc}
+              className={`px-6 py-3 rounded-full text-[23px] font-bold cursor-pointer border-2
+                transition-colors duration-150
+                ${source === s.key
+                  ? "border-accent bg-accentsoft text-accent"
+                  : "border-line bg-surface text-muted hover:text-ink"}`}
+            >
+              {i + 1}. {s.label}
+            </button>
+          ))}
+        </div>
+
+        {source === "laptop" && (
+          <div className="flex items-center gap-4 ml-auto">
+            {laptop.state === "live" ? (
+              <button
+                onClick={laptop.stop}
+                className="h-14 px-6 rounded-(--radius-ctl) border border-warn/40 text-warn bg-surface
+                           hover:bg-warnsoft text-[24px] font-bold cursor-pointer"
+              >
+                중지
+              </button>
+            ) : (
+              <button
+                onClick={laptop.start}
+                disabled={laptop.state === "starting"}
+                className="h-14 px-6 rounded-(--radius-ctl) bg-accent text-white text-[24px] font-bold
+                           cursor-pointer disabled:opacity-40"
+              >
+                {laptop.state === "starting" ? "여는 중…" : "시작"}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <p className="text-muted text-[21px] mt-3">
+        {source === "laptop"
+          ? "이 컴퓨터의 카메라·마이크가 동행이에게 연결됩니다. 말을 걸면 대답하고, 낙상·복약 감지도 함께 돕니다."
+          : "휴대폰이 보내는 화면을 지켜보기만 합니다. 이 화면에서 말을 걸 수는 없습니다."}
+      </p>
+      {laptop.error && source === "laptop" && (
+        <p role="alert" className="text-warn text-[22px] mt-2">{laptop.error}</p>
+      )}
+    </section>
   );
 }
 

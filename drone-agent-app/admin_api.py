@@ -46,7 +46,8 @@ async def signup(
     except accounts.AccountError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"ok": True, "token": accounts.make_token(user["id"]),
-            "email": user["email"], "name": user["name"]}
+            "email": user["email"], "name": user["name"],
+            "agent_id": user["agent_id"]}
 
 
 @router.post("/login")
@@ -56,7 +57,8 @@ async def login(email: str = Body(...), password: str = Body(...)):
     except accounts.AccountError as e:
         raise HTTPException(status_code=401, detail=str(e))
     return {"ok": True, "token": accounts.make_token(user["id"]),
-            "email": user["email"], "name": user["name"]}
+            "email": user["email"], "name": user["name"],
+            "agent_id": user["agent_id"]}
 
 
 @router.get("/me")
@@ -66,7 +68,10 @@ async def me(user: dict = Depends(require_auth)):
     콘솔이 화면을 그리기 전에 부른다 — 브라우저에 남아 있는 값만 믿으면
     로그인한 적 없는 사람도 주소만 치면 관리 화면이 열린다.
     """
-    return {"ok": True, "email": user["email"], "name": user["name"]}
+    # agent_id도 함께 준다 — 노트북을 카메라로 쓸 때 기기가 어느 어르신 곁인지
+    # 알려야 하고(/ws/unified?agent=N), 그 값을 화면이 알 방법이 여기밖에 없다.
+    return {"ok": True, "email": user["email"], "name": user["name"],
+            "agent_id": user["agent_id"]}
 
 
 @router.get("/config")
