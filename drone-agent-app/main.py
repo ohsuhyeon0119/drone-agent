@@ -30,7 +30,7 @@ import memory
 from admin_api import router as admin_router
 from agent.persona import build_unified_persona
 from agent.scenarios import load_scenarios
-from agent.tools import NOTIFY_CAREGIVER_TOOL, notify_caregiver
+from agent.tools import build_tool_mapping, build_tools
 from detection_graph import detection_graph
 from gemini_live import GeminiLive
 
@@ -276,7 +276,21 @@ async def ws_unified(websocket: WebSocket):
     # agent/scenarios/*.yaml을 연결마다 새로 읽는다 — 서버 프로세스를 재시작하지
     # 않아도 지침을 고친 뒤 세션을 새로 시작하면(재연결하면) 바로 반영되게 하기 위함.
     scenarios = load_scenarios()
-    unified_persona = build_unified_persona(scenarios)
+
+    # 행동(tool)과 연락처도 연결마다 새로 읽는다 — 콘솔에서 배포한 내용이
+    # 다음 대화부터 반영되게 하기 위함. Gemini Live는 tool을 연결 시점에만
+    # 고정할 수 있어서, 이미 열린 세션에는 반영할 수 없다.
+    live_config = admin_store.get_live()["config"]
+    actions = live_config.get("actions", [])
+    contacts = live_config.get("contacts", [])
+    # 시나리오에서 태깅한 연락 대상을 행동별로 모은다 (누구에게 연락할지의 근거)
+    contact_ids_by_action: dict[str, list[str]] = {}
+    for s in live_config.get("scenarios", []):
+        action_id = s.get("action")
+        if action_id:
+            contact_ids_by_action.setdefault(action_id, []).extend(s.get("notify_contact_ids") or [])
+
+    unified_persona = build_unified_persona(scenarios, actions)
 
     audio_input_queue = asyncio.Queue()
     video_input_queue = asyncio.Queue()
@@ -284,12 +298,29 @@ async def ws_unified(websocket: WebSocket):
     nudge_input_queue = asyncio.Queue()
     frame_buffer = {"data": None}
 
+    async def on_tool_event(payload: dict):
+        """tool이 실제로 실행됐을 때 — 활동 기록에 남기고 화면에도 보여준다."""
+        admin_store.log_event("tool_call", payload)
+        try:
+            await websocket.send_json({"type": "tool_result", **payload})
+        except Exception:
+            pass  # 이미 끊긴 세션이면 기록만 남기고 넘어간다
+
+    tool_context = {
+        "contacts": contacts,
+        "contact_ids_by_action": contact_ids_by_action,
+        "on_event": on_tool_event,
+    }
+    tools = build_tools(actions)
+    logger.info(f"[/unified] 등록된 행동: {[a.get('id') for a in actions]} / "
+                f"연락처 {len(contacts)}명")
+
     gemini_client = GeminiLive(
         api_key=GEMINI_API_KEY,
         model=GEMINI_MODEL,
         input_sample_rate=16000,
-        tools=[NOTIFY_CAREGIVER_TOOL],
-        tool_mapping={"notify_caregiver": notify_caregiver},
+        tools=tools,
+        tool_mapping=build_tool_mapping(actions, tool_context),
         system_instruction=unified_persona,
     )
 
@@ -373,6 +404,10 @@ async def ws_unified(websocket: WebSocket):
 
             if result.get("should_trigger"):
                 record = memory.record_medication_taken(note=result.get("reason", ""))
+                # 카메라 감지로 남긴 기록도 활동 기록에 넣는다 — 콘솔에서 "무슨 일이
+                # 있었나"를 볼 때 tool 호출과 같은 자리에 보여야 하기 때문.
+                admin_store.log_event("medication_recorded",
+                                      {"source": "vision", "record": record})
                 logger.info(f"[/unified:medication] Medication taken! record={record}")
                 await websocket.send_json({
                     "type": "memory_update",

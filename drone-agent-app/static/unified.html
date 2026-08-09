@@ -132,8 +132,15 @@ function handleJson(msg) {
     appendMsg("system-nudge", "⚙️ " + msg.text);
   } else if (msg.type === "tool_call") {
     appendMsg("tool-call", `🛠️ ${msg.name}(${JSON.stringify(msg.args)}) → ${msg.result}`);
-    if (msg.name === "notify_caregiver") {
-      showToast("📨", "보호자에게 알림을 전송했습니다", msg.args?.message || "", "good");
+  } else if (msg.type === "tool_result") {
+    // 실제로 누구에게 전달됐는지 — 서버가 연락 대상을 확정한 뒤 보내준다
+    const who = (msg.targets || []).map((t) => `${t.name}(${t.relation})`).join(", ");
+    if (msg.tool === "notify_caregiver") {
+      showToast(who ? "📨" : "⚠️",
+        who ? `${who}에게 알림을 전송했습니다` : "등록된 연락처가 없어 알리지 못했습니다",
+        msg.message || "", who ? "good" : "warn");
+    } else if (msg.tool === "record_medication") {
+      showToast("💊", "복용 기록을 남겼습니다", msg.note || "", "good");
     }
   } else if (msg.type === "detect_result") {
     appendEventLog(msg);

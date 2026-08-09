@@ -58,9 +58,12 @@ BUILTIN_ACTIONS = [
         "needs_contacts": True,
     },
     {
+        # 카메라로 확인된 복용은 감지 루프가 직접 기록하므로, 이 행동은 사용자가
+        # "약 먹었어요"라고 말로 알렸을 때를 위한 것이다 (중복 기록 방지).
         "id": "record_medication",
         "name": "복약 기록",
-        "description": "복약이 확인되어 기록을 남길 때",
+        "description": "사용자가 약을 먹었다고 말로 알렸을 때 기록을 남깁니다. "
+                       "카메라로 이미 확인된 경우에는 호출하지 마세요.",
         "params": [{"name": "기록 내용", "desc": "남길 내용"}],
         "kind": "builtin",
         "needs_contacts": False,

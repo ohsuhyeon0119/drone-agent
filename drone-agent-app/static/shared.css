@@ -407,6 +407,11 @@ body {
   transform: translateX(0);
 }
 
+/* 실행하지 못한 경우 — 성공한 알림과 눈에 띄게 구분한다 */
+.toast.warn {
+  background: #8a3d1f;
+}
+
 .toast .icon {
   flex: none;
   font-size: 1.1rem;

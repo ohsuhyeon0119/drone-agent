@@ -31,7 +31,24 @@ def _render_scenario_block(index: int, scenario: dict) -> str:
     return f"{index}. {scenario['name']} 신호를 받으면:\n{bullets}"
 
 
-def build_unified_persona(scenarios: dict) -> str:
+def _render_actions_block(actions: list[dict]) -> str:
+    """등록된 행동(tool)을 페르소나에 명시한다.
+
+    선언만 넘기면 모델이 "연락드릴게요"라고 말만 하고 호출하지 않는 경우가 있어서,
+    무엇을 쓸 수 있고 언제 쓰는지를 지침 안에서도 한 번 더 못박는다.
+    """
+    if not actions:
+        return ""
+    lines = "\n".join(
+        f"   - {a.get('id')}: {a.get('description') or a.get('name')}" for a in actions
+    )
+    return (
+        "\n\n당신이 실제로 실행할 수 있는 도구입니다. 상황이 해당하면 말로만 "
+        "약속하지 말고 반드시 도구를 호출하세요:\n" + lines
+    )
+
+
+def build_unified_persona(scenarios: dict, actions: list[dict] | None = None) -> str:
     """PERSONA_BASE + 시나리오별 지침을 하나의 시스템 프롬프트로 합친다.
 
     어떤 [SYSTEM] 신호가 오든 그때그때 알아서 대응하고, 아무 신호가 없을 때는
@@ -49,4 +66,5 @@ def build_unified_persona(scenarios: dict) -> str:
         + f"\n\n{other_index}. 그 외에는: 평소처럼 자유롭게 대화하거나, 사용자가 화면·물건에 대해 "
         "물어보면 카메라로 보이는 것을 근거로 쉽고 친절하게 설명해주세요.\n\n"
         "여러 신호가 겹치면 더 급한 것(낙상)을 우선하세요."
+        + _render_actions_block(actions or [])
     )
