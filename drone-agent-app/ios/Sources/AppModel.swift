@@ -9,8 +9,10 @@ final class AppModel: ObservableObject {
     @Published var status = "대기 중"
     @Published var caption = ""
     /// 감지기별로 따로 들고 있어야 한다 — 한 칸에 쓰면 2초마다 서로 덮어써서 읽을 수가 없다.
-    @Published var detectionFall = ""
-    @Published var detectionMed = ""
+    /// 시나리오는 콘솔에서 늘어날 수 있으므로 종류를 앱에 박아두지 않고 키로 받는다.
+    @Published var detections: [String: String] = [:]
+    /// 화면 순서가 매번 뒤집히지 않도록 처음 등장한 순서를 기억한다.
+    @Published private(set) var detectionOrder: [String] = []
     @Published var alertText: String?
     @Published var alertIsPositive = false
     @Published var isBusy = false
@@ -91,8 +93,8 @@ final class AppModel: ObservableObject {
 
         camera.start()
         caption = ""
-        detectionFall = ""
-        detectionMed = ""
+        detections = [:]
+        detectionOrder = []
         captionClosed = true
         isLive = true
     }
@@ -155,18 +157,21 @@ final class AppModel: ObservableObject {
         case "detect_result":
             // 2초마다 온다. confidence/reason까지 띄워야 왜 안 잡히는지 화면에서 알 수 있다.
             guard let source = event.source else { return }
-            let icon = source == "fall" ? "🚨" : "💊"
+            // 서버가 시나리오 이름(label)을 함께 준다 — 아이콘을 종류별로 박아두면
+            // 콘솔에서 시나리오를 추가할 때마다 앱을 다시 배포해야 한다.
+            let label = (event.raw["label"] as? String) ?? source
             let line: String
             if event.raw["ok"] as? Bool == true {
                 let detected = event.raw["event"] as? String ?? "?"
                 let confidence = (event.raw["confidence"] as? Double) ?? 0
                 let reason = (event.raw["reason"] as? String) ?? ""
                 let mark = detected == "none" ? "·" : "●"
-                line = "\(icon)\(mark) \(detected) \(Int(confidence * 100))%  \(reason)"
+                line = "\(mark) \(label) \(Int(confidence * 100))%  \(reason)"
             } else {
-                line = "\(icon) 감지 오류: \((event.raw["error"] as? String) ?? "알 수 없음")"
+                line = "⚠ \(label): \((event.raw["error"] as? String) ?? "알 수 없음")"
             }
-            if source == "fall" { detectionFall = line } else { detectionMed = line }
+            if detections[source] == nil { detectionOrder.append(source) }
+            detections[source] = line
 
         case "system_nudge":
             showAlert("▶︎ 감지 확정 — 동행이가 먼저 말을 겁니다", positive: true)

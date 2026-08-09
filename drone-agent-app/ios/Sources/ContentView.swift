@@ -19,8 +19,9 @@ struct ContentView: View {
                     banner(alert)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                if !model.detectionFall.isEmpty { chip(model.detectionFall) }
-                if !model.detectionMed.isEmpty { chip(model.detectionMed) }
+                ForEach(model.detectionOrder, id: \.self) { key in
+                    if let line = model.detections[key] { chip(line) }
+                }
                 if !model.caption.isEmpty {
                     captionView
                 }

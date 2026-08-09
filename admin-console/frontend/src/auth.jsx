@@ -22,7 +22,8 @@ export function AuthProvider({ children }) {
     }
     try {
       const data = await me();
-      setUser({ email: data.email, name: data.name, agentId: data.agent_id });
+      setUser({ email: data.email, name: data.name, agentId: data.agent_id,
+                pairCode: data.pair_code || "" });
       setStatus("ok");
     } catch {
       /* 401이면 api.js가 토큰을 이미 지웠다. 서버가 꺼져 있는 등 다른 이유로
@@ -46,7 +47,8 @@ export function AuthProvider({ children }) {
     status,
     user,
     markLoggedIn: (info) => {
-      if (info) setUser({ email: info.email, name: info.name, agentId: info.agent_id });
+      if (info) setUser({ email: info.email, name: info.name, agentId: info.agent_id,
+                          pairCode: info.pair_code || "" });
       setStatus("ok");
     },
     logout: () => { clearToken(); setUser(null); setStatus("no"); },

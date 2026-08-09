@@ -71,6 +71,11 @@ export const publishConfig = () => request("/publish", { method: "POST" });
 export const rollbackTo = (version) => request(`/rollback/${version}`, { method: "POST" });
 export const getVersion = (version) => request(`/versions/${version}`);
 
+/* 어르신 폰에 넣을 6자 코드. 보호자는 이메일·비밀번호로 들어오지만 어르신에게
+   그걸 시킬 수는 없어서, 폰은 이 코드 하나로 자기가 누구 곁인지 증명한다. */
+export const getPairCode = () => request("/pair-code");
+export const regeneratePairCode = () => request("/pair-code/regenerate", { method: "POST" });
+
 export const getProfile = () => request("/profile");
 export const putProfile = (profile) => request("/profile", { method: "PUT", body: { profile } });
 

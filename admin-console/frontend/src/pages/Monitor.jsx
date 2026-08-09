@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getToken } from "../api.js";
+import { getPairCode, getProfile, getToken, regeneratePairCode } from "../api.js";
 import { useAuth } from "../auth.jsx";
 import { useLocalDevice } from "../useLocalDevice.js";
 
@@ -69,8 +69,19 @@ export default function Monitor() {
   /* 어디를 카메라로 쓸지. 휴대폰이 기본이고, 노트북은 기기가 없을 때
      관리 화면만으로 전체 동작을 확인하기 위한 것이다. */
   const [source, setSource] = useState("phone");
+  /* 지금 보고 있는 화면이 누구의 것인지 이름이 없으면, 계정을 여러 개 쓰는
+     보호자가 엉뚱한 어르신을 보면서 괜찮다고 판단할 수 있다. */
+  const [elder, setElder] = useState(null);
   const { user } = useAuth();
   const laptop = useLocalDevice({ agentId: user?.agentId, withAudio: true });
+
+  useEffect(() => {
+    let alive = true;
+    getProfile()
+      .then((d) => { if (alive) setElder(d.profile || {}); })
+      .catch(() => { /* 프로필이 없어도 모니터링 자체는 되어야 한다 */ });
+    return () => { alive = false; };
+  }, []);
 
   const switchSource = (next) => {
     if (next === source) return;
@@ -146,13 +157,20 @@ export default function Monitor() {
     <>
       <header className="flex flex-wrap items-center justify-between gap-4 mb-7">
         <div>
-          <h1 className="text-[27px] font-bold">모니터링</h1>
+          <h1 className="text-[27px] font-bold">
+            {elder?.name ? `${elder.name} 어르신` : "모니터링"}
+          </h1>
           <p className="text-muted mt-2 text-[15px]">
-            카메라가 보고 있는 화면과 그 사이 일어난 일입니다.
+            {elder?.name
+              ? "지금 카메라가 보고 있는 화면과 그 사이 일어난 일입니다."
+              : "카메라가 보고 있는 화면과 그 사이 일어난 일입니다."}
+            {status.connected && status.since && ` · ${status.since}부터 연결됨`}
           </p>
         </div>
         <StatusPill connected={status.connected} link={linkState} />
       </header>
+
+      {source === "phone" && !status.connected && <PairPanel initial={user?.pairCode} />}
 
       <SourcePicker source={source} onChange={switchSource} laptop={laptop} />
 
@@ -210,6 +228,79 @@ export default function Monitor() {
         </section>
       </div>
     </>
+  );
+}
+
+/* 어르신 폰이 아직 안 붙었을 때만 보인다.
+   붙고 나면 화면을 가릴 이유가 없고, 코드를 계속 띄워둘 이유도 없다. */
+function PairPanel({ initial }) {
+  const [code, setCode] = useState(initial || "");
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (code) return;
+    getPairCode()
+      .then((d) => setCode(d.pair_code || ""))
+      .catch(() => { /* 코드를 못 받아도 모니터링은 계속 보여야 한다 */ });
+  }, [code]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* 클립보드가 막힌 브라우저에서는 화면의 코드를 직접 읽으면 된다 */
+    }
+  };
+
+  const regenerate = async () => {
+    if (!confirm("코드를 새로 만들면 지금 연결된 휴대폰은 다음 연결부터 거부됩니다. 진행할까요?")) return;
+    setBusy(true);
+    try {
+      const d = await regeneratePairCode();
+      setCode(d.pair_code || "");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="mb-6 bg-surface border border-line rounded-(--radius-card) px-6 py-5">
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
+        <div>
+          <h2 className="text-[14px] font-bold">휴대폰 연결 코드</h2>
+          <p className="text-muted text-[13px] mt-1">
+            어르신 휴대폰의 동행이 앱에 이 코드를 넣으면 연결됩니다.
+          </p>
+        </div>
+
+        <span className="font-mono text-[30px] font-bold tracking-[0.32em] tabular-nums select-all">
+          {code || "······"}
+        </span>
+
+        <div className="flex items-center gap-3 ml-auto">
+          <button
+            onClick={copy}
+            disabled={!code}
+            className="h-14 px-6 rounded-(--radius-ctl) border border-line bg-surface
+                       hover:border-accent text-ink text-[14px] font-bold cursor-pointer
+                       disabled:opacity-40"
+          >
+            {copied ? "복사됨" : "복사"}
+          </button>
+          <button
+            onClick={regenerate}
+            disabled={busy || !code}
+            className="h-14 px-6 rounded-(--radius-ctl) border border-warn/40 text-warn bg-surface
+                       hover:bg-warnsoft text-[14px] font-bold cursor-pointer disabled:opacity-40"
+          >
+            {busy ? "발급 중…" : "새 코드"}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
