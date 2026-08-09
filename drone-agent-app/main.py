@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 import admin_store
 import memory
 from admin_api import router as admin_router
-from agent.persona import build_unified_persona
+from agent.persona import build_nudge, build_unified_persona
 from agent.scenarios import load_scenarios
 from agent.summarizer import summarize
 from agent.tools import build_tool_mapping, build_tools
@@ -439,10 +439,11 @@ async def ws_unified(websocket: WebSocket):
             if side_effect:
                 await side_effect(websocket, result)
 
-            nudge = result.get("nudge_text") or ""
-            if nudge:
-                await websocket.send_json({"type": "system_nudge", "text": nudge})
-                await nudge_input_queue.put(nudge)
+            # 신호 문구는 여기서 만든다 — 카메라가 왜 그렇게 판단했는지(reason)를
+            # 함께 넣어야 동행이가 상황에 맞게 물어볼 수 있다.
+            nudge = build_nudge(scenario, result.get("reason"))
+            await websocket.send_json({"type": "system_nudge", "text": nudge})
+            await nudge_input_queue.put(nudge)
 
     # 켜져 있고 감지 기준이 있는 시나리오마다 하나씩
     vision_tasks = [

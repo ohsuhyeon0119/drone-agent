@@ -20,7 +20,6 @@ export default function ScenarioNew() {
   const { draft, addScenario } = useStore();
   const [name, setName] = useState("");
   const [detectPrompt, setDetectPrompt] = useState("");
-  const [nudge, setNudge] = useState("");
   const [cooldown, setCooldown] = useState(15);
   const [key, setKey] = useState("");
 
@@ -38,8 +37,6 @@ export default function ScenarioNew() {
       id: finalKey,
       name: name.trim(),
       detectPrompt: detectPrompt.trim(),
-      nudgeTemplate: nudge.trim() ||
-        `[SYSTEM] ${name.trim()} 상황이 감지되었습니다. 어르신께 확인해 보세요.`,
       cooldown: Number(cooldown),
       instructions: [],
     });
@@ -92,18 +89,6 @@ export default function ScenarioNew() {
             placeholder={"예: 어르신이 식탁에 앉아 수저를 들고 음식을 드시는 중인지 판단하세요.\n다음은 감지로 보지 않습니다: 식탁에 음식만 놓여 있는 경우, 물만 마시는 경우."}
             value={detectPrompt}
             onChange={(e) => setDetectPrompt(e.target.value)}
-          />
-        </Field>
-
-        <Field
-          label="감지되면 동행이에게 전할 신호"
-          help="비워 두면 자동으로 만들어집니다. 동행이가 이 신호를 받고 먼저 말을 겁니다."
-        >
-          <textarea
-            className={`${inputCls} h-28 py-4 leading-relaxed resize-none`}
-            placeholder={`[SYSTEM] ${name.trim() || "이 상황"}이 감지되었습니다. 어르신께 확인해 보세요.`}
-            value={nudge}
-            onChange={(e) => setNudge(e.target.value)}
           />
         </Field>
 

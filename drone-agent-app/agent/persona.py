@@ -94,6 +94,29 @@ def _render_scenario_block(index: int, scenario: dict, action_names: dict | None
     return f"{index}. {scenario['name']} 신호를 받으면:\n" + "\n".join(lines)
 
 
+def build_nudge(scenario: dict, reason: str | None = None) -> str:
+    """감지됐을 때 대화에 밀어넣을 [SYSTEM] 신호를 만든다.
+
+    이건 보호자가 쓸 문장이 아니다 — '[SYSTEM]으로 시작하고, 하던 말을 멈추라고
+    지시한다'는 건 모델을 다루는 규약이지 돌봄 설정이 아니기 때문이다. 시나리오
+    이름과 지침은 이미 페르소나에 들어 있으므로, 신호는 "무엇이 감지됐는지"와
+    "지금 먼저 말을 걸라"만 전달하면 된다.
+
+    카메라가 그렇게 판단한 근거(reason)를 함께 넘긴다 — 같은 낙상이라도 "바닥에
+    엎드려 있음"과 "의자 옆에 쓰러져 있음"은 동행이가 물어볼 말이 달라진다.
+
+    시나리오에 nudge_template이 명시돼 있으면 그것을 쓴다 (yaml을 직접 다루는
+    경우를 위한 예외로만 남겨둔다).
+    """
+    name = scenario.get("name") or scenario.get("key") or "상황"
+    base = (scenario.get("nudge_template") or "").strip() or (
+        f"[SYSTEM] 카메라로 '{name}' 상황이 감지되었습니다. "
+        f"지금 하던 대화를 자연스럽게 멈추고, '{name}' 지침대로 먼저 말을 거세요."
+    )
+    reason = (reason or "").strip()
+    return f"{base} (카메라가 본 것: {reason})" if reason else base
+
+
 def _render_actions_block(actions: list[dict]) -> str:
     """등록된 행동(tool)을 페르소나에 명시한다.
 
