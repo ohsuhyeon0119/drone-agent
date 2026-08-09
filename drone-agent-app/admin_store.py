@@ -161,6 +161,7 @@ def _bundle_from_yaml() -> dict:
             "enabled": True,
             "detect_prompt": s.get("detect_prompt", ""),
             "cooldown": float(s.get("cooldown", 10.0)),
+            "min_confidence": float(s.get("min_confidence", 0.7)),
             "nudge_template": s.get("nudge_template", ""),
             "instructions": list(s.get("instructions", [])),
             "action": s.get("action"),
@@ -457,6 +458,9 @@ def _export_live(conn: sqlite3.Connection, agent_id: int = DEFAULT_AGENT_ID):
             "name": s["name"],
             "target_event": s.get("target_event", "event"),
             "cooldown": float(s.get("cooldown", 10.0)),
+            # 이 값 미만의 확신도는 트리거하지 않는다 — 빠지면 기본값에 의존하게 되므로
+            # 실제로 무슨 값이 쓰이는지 파일에서 바로 보이도록 함께 내보낸다
+            "min_confidence": float(s.get("min_confidence", 0.7)),
             "detect_prompt": s.get("detect_prompt", ""),
             "nudge_template": s.get("nudge_template", ""),
             "instructions": list(s.get("instructions", [])),

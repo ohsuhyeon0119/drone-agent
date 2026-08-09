@@ -1,9 +1,11 @@
 # 이 파일은 관리 콘솔이 배포할 때 자동으로 씁니다 (원천: data/console.db).
+# 배포 버전 v3 · 2026-08-09 16:43
 # 손으로 고쳐도 동작하지만, 다음 배포 때 덮어써집니다.
 key: fall
 name: 낙상 감지
 target_event: fall
 cooldown: 10.0
+min_confidence: 0.7
 detect_prompt: |
   당신은 어르신 곁을 지키는 돌봄 카메라의 낙상 감지기입니다.
   정지 화면 한 장을 보고 지금 낙상이 일어난 상태인지 판단하세요.
@@ -42,4 +44,3 @@ instructions:
 - 사용자가 괜찮지 않다고 답하거나 응답이 없으면 notify_caregiver 도구로 보호자에게 알립니다.
 - 사용자가 명확히 괜찮다고 답하면 신고하지 않고 안심시키는 말로 마무리합니다.
 action: notify_caregiver
-min_confidence: 0.7

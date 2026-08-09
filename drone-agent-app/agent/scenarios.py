@@ -29,6 +29,7 @@ DEFAULT_SCENARIOS = {
         "name": "낙상 감지",
         "target_event": "fall",
         "cooldown": 10.0,
+        "min_confidence": 0.7,
         "detect_prompt": (
             "이 이미지를 보고 사람이 엎드려 있거나 넘어져 있는지 감지하라.\n"
             "반드시 아래 JSON 형식으로만 답하라, 코드펜스 금지:\n"
@@ -51,6 +52,7 @@ DEFAULT_SCENARIOS = {
         "name": "복약 확인",
         "target_event": "taken",
         "cooldown": 15.0,
+        "min_confidence": 0.7,
         "detect_prompt": (
             "이 이미지를 보고 사람이 알약, 약봉투, 약통, 물컵을 손에 들고 있거나\n"
             "입 근처로 가져가 약을 복용하는 동작을 하고 있는지 감지하라.\n"

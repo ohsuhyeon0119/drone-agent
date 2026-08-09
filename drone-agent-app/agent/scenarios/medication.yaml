@@ -1,9 +1,11 @@
 # 이 파일은 관리 콘솔이 배포할 때 자동으로 씁니다 (원천: data/console.db).
+# 배포 버전 v3 · 2026-08-09 16:43
 # 손으로 고쳐도 동작하지만, 다음 배포 때 덮어써집니다.
 key: medication
 name: 복약 확인
 target_event: taken
 cooldown: 15.0
+min_confidence: 0.7
 detect_prompt: |
   당신은 어르신 곁을 지키는 돌봄 카메라의 복약 확인기입니다.
   정지 화면 한 장을 보고 지금 약을 드시는 중인지 판단하세요.
@@ -40,4 +42,3 @@ instructions:
 - 카메라로 복용이 확인되면 "잘하셨어요!"처럼 따뜻하게 칭찬합니다.
 - 아직 복용하지 않았다면 다그치지 않고 부드럽게 다시 권유합니다.
 action: record_medication
-min_confidence: 0.7
