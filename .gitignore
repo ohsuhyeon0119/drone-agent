@@ -41,3 +41,6 @@ drone-agent-app/agent/scenarios/*/
 
 # 문서 변환 산출물
 *.docx
+
+# 관리 화면 빌드 산출물 (배포 시 rsync로 올린다)
+drone-agent-app/console/

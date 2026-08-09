@@ -93,6 +93,15 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/agent-static", StaticFiles(directory="agent/static"), name="agent-static")
 
+# 관리 화면(보호자용 콘솔)의 빌드 산출물. 빌드본이 없는 개발 환경에서는 콘솔을
+# Vite(5173)로 따로 띄우므로, 없으면 조용히 건너뛴다.
+CONSOLE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "console")
+CONSOLE_INDEX = os.path.join(CONSOLE_DIR, "index.html")
+HAS_CONSOLE = os.path.isfile(CONSOLE_INDEX)
+if HAS_CONSOLE:
+    app.mount("/assets", StaticFiles(directory=os.path.join(CONSOLE_DIR, "assets")),
+              name="console-assets")
+
 
 @app.middleware("http")
 async def _no_cache_static(request, call_next):
@@ -111,7 +120,12 @@ app.include_router(admin_router)
 
 @app.get("/")
 async def root():
-    return FileResponse("static/unified.html")
+    """루트는 보호자용 관리 화면이다.
+
+    이 주소로 들어오는 사람은 설정을 하러 오는 보호자다. 어르신은 폰 앱이나
+    드론으로 붙지 주소를 치지 않는다. 어르신과 대화하는 화면은 /unified에 둔다.
+    """
+    return FileResponse(CONSOLE_INDEX if HAS_CONSOLE else "static/unified.html")
 
 
 @app.get("/unified")
