@@ -121,11 +121,13 @@ final class AppModel: ObservableObject {
     // MARK: - 배선
 
     private func wire() {
-        socket.onState = { [weak self] connected, message in
+        socket.onState = { [weak self] state, message in
             Task { @MainActor in
                 guard let self else { return }
                 self.status = message
-                if !connected, self.isLive {
+                // 재연결 중에는 대화를 끝내지 않는다 — 오디오 엔진과 카메라를 그대로
+                // 두고 소켓만 다시 붙으면, 어르신이 아무것도 누르지 않아도 이어진다.
+                if case .closed = state, self.isLive {
                     self.stop(reason: message)
                 }
             }

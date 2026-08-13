@@ -21,22 +21,43 @@ final class SessionClient: NSObject {
     private var task: URLSessionWebSocketTask?
     private lazy var urlSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
 
+    enum State {
+        case open
+        /// 끊겼지만 다시 붙는 중 — 대화는 계속하려는 상태다.
+        case retrying
+        /// 사용자가 껐거나 더 시도하지 않는다.
+        case closed
+    }
+
     private(set) var isOpen = false
     private var closeReported = false
 
+    /// 사용자가 대화를 원하는 동안 true. 서버가 끊어도 이 값이 true면 다시 붙는다.
+    private var wantsConnection = false
+    private var retryDelay: TimeInterval = 1
+    private var retryTask: Task<Void, Never>?
+    private let maxRetryDelay: TimeInterval = 8
+
     var onAudio: ((Data) -> Void)?
     var onEvent: ((AgentEvent) -> Void)?
-    /// (연결됨 여부, 사람이 읽을 상태 문구)
-    var onState: ((Bool, String) -> Void)?
+    /// (상태, 사람이 읽을 문구)
+    var onState: ((State, String) -> Void)?
 
     /// 페어링으로 받은 기기 토큰. 서버가 이걸로 agent_id를 판별한다.
     var deviceToken: String?
 
     func connect() {
-        disconnect()
+        wantsConnection = true
+        retryDelay = 1
+        openSocket()
+    }
+
+    private func openSocket() {
+        closeSocket()
         closeReported = false
         guard let url = Config.unifiedURL(token: deviceToken) else {
-            onState?(false, "서버 주소가 올바르지 않습니다")
+            wantsConnection = false
+            onState?(.closed, "서버 주소가 올바르지 않습니다")
             return
         }
         let t = urlSession.webSocketTask(with: url)
@@ -46,9 +67,34 @@ final class SessionClient: NSObject {
     }
 
     func disconnect() {
+        wantsConnection = false
+        retryTask?.cancel()
+        retryTask = nil
+        closeSocket()
+    }
+
+    private func closeSocket() {
         isOpen = false
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
+    }
+
+    /// Gemini 세션이 컨텍스트 한계로 끊기는 일이 있어서, 끊겼다고 대화를 끝내면
+    /// 어르신이 매번 버튼을 다시 눌러야 한다. 잠깐 기다렸다가 스스로 다시 붙는다.
+    private func scheduleRetry(_ message: String) {
+        guard wantsConnection else {
+            onState?(.closed, message)
+            return
+        }
+        let delay = retryDelay
+        retryDelay = min(retryDelay * 2, maxRetryDelay)
+        onState?(.retrying, "다시 연결 중…")
+        retryTask?.cancel()
+        retryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self, self.wantsConnection else { return }
+            self.openSocket()
+        }
     }
 
     func send(pcm: Data) {
@@ -107,7 +153,7 @@ final class SessionClient: NSObject {
         guard !closeReported else { return }
         closeReported = true
         isOpen = false
-        onState?(false, message)
+        scheduleRetry(message)
     }
 }
 
@@ -116,7 +162,8 @@ extension SessionClient: URLSessionWebSocketDelegate {
                     webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol protocol: String?) {
         isOpen = true
-        onState?(true, "연결됨")
+        retryDelay = 1          // 한 번 붙었으면 다음 끊김은 다시 1초부터
+        onState?(.open, "연결됨")
     }
 
     func urlSession(_ session: URLSession,

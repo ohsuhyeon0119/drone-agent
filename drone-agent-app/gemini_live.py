@@ -49,6 +49,14 @@ class GeminiLive:
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
             tools=self.tools,
+            # 영상과 음성이 계속 쌓이면 컨텍스트가 차고, 그 순간 서버가 세션을
+            # 끊는다(1007). 응답을 말하던 중에 끊기므로 "몇 마디 하다 뒷부분이
+            # 사라지는" 형태로 나타난다. 오래된 맥락을 밀어내며 이어가게 한다.
+            context_window_compression=types.ContextWindowCompressionConfig(
+                sliding_window=types.SlidingWindow(),
+            ),
+            # 연결이 끊겨도 대화 맥락을 이어받을 수 있게 핸들을 받아둔다.
+            session_resumption=types.SessionResumptionConfig(),
         )
         
         logger.info(f"Connecting to Gemini Live with model={self.model}")

@@ -31,6 +31,7 @@ final class AudioIO {
     private var sentBytes = 0
     private var conversionErrors = 0
     private var emptyOutputs = 0
+    private var underruns = 0
 
     /// 변환된 16kHz PCM16 청크. 오디오 스레드에서 불린다.
     var onMicPCM: ((Data) -> Void)?
@@ -185,55 +186,29 @@ final class AudioIO {
 
     // MARK: - 24kHz PCM16 → 스피커
 
-    /// 도착한 조각을 곧바로 재생 예약하면 네트워크 지터가 그대로 소리 구멍이 된다.
-    /// 조금 모았다가(프라임) 일정 크기로 잘라 넣어, 잠깐 늦게 오는 조각을 흡수한다.
-    /// 대가는 시작 지연 \(primeMilliseconds)ms인데, 끊기는 것보다 낫다.
-    private let primeMilliseconds = 220
-    private let chunkMilliseconds = 80
-
-    private var pending = Data()
-    private var isPriming = true
     private var scheduledChunks = 0
 
-    private var primeBytes: Int { bytes(forMilliseconds: primeMilliseconds) }
-    private var chunkBytes: Int { bytes(forMilliseconds: chunkMilliseconds) }
-
-    private func bytes(forMilliseconds ms: Int) -> Int {
-        // 16비트 mono라 프레임당 2바이트
-        Int(Config.playSampleRate) * 2 * ms / 1000
-    }
-
+    /// 도착한 조각을 그대로 이어서 예약한다.
+    ///
+    /// 한때 지터 버퍼(모았다가 잘라 넣기)를 얹었는데, 정작 원래 끊김의 원인은
+    /// 서버 쪽 세션이 죽는 것(1007)이었고 버퍼링은 오히려 재생을 멈추게 했다.
+    /// AVAudioPlayerNode는 예약된 버퍼를 빈틈없이 이어 재생하므로, 도착하는 대로
+    /// 넣는 것이 가장 단순하고 정확하다.
     func play(_ data: Data) {
         ioQueue.async { [weak self] in
             guard let self, self.engine.isRunning else { return }
-            self.pending.append(data)
-
-            // 말이 시작될 때만 모은다. 한 번 흐르기 시작하면 계속 이어 붙인다.
-            if self.isPriming {
-                guard self.pending.count >= self.primeBytes else { return }
-                self.isPriming = false
+            if self.scheduledChunks == 0 {
+                self.underruns += 1
+                if self.underruns % 10 == 1 {
+                    self.log("재생 예약이 비어 있던 횟수 \(self.underruns)")
+                }
             }
-            self.drain(chunkSize: self.chunkBytes)
+            self.schedule(data)
         }
     }
 
-    /// 한 턴이 끝나면 남은 꼬리를 마저 내보낸다. 안 그러면 마지막 한 음절이 잘린다.
-    func endOfTurn() {
-        ioQueue.async { [weak self] in
-            guard let self else { return }
-            self.drain(chunkSize: 1)
-            self.isPriming = true
-        }
-    }
-
-    private func drain(chunkSize: Int) {
-        while pending.count >= chunkSize, pending.count > 0 {
-            let size = min(chunkBytes, pending.count)
-            let chunk = pending.prefix(size)
-            pending.removeFirst(size)
-            schedule(Data(chunk))
-        }
-    }
+    /// 턴 경계에서 따로 할 일은 없다 — 남겨둔 조각이 없기 때문이다.
+    func endOfTurn() {}
 
     private func schedule(_ data: Data) {
         let frames = data.count / MemoryLayout<Int16>.size
@@ -256,10 +231,6 @@ final class AudioIO {
             guard let self else { return }
             self.ioQueue.async {
                 self.scheduledChunks -= 1
-                // 예약이 다 소진되면 다음 말은 처음부터 다시 모은다.
-                if self.scheduledChunks == 0 && self.pending.isEmpty {
-                    self.isPriming = true
-                }
             }
         }
         if !player.isPlaying { player.play() }
@@ -270,9 +241,7 @@ final class AudioIO {
     func flushPlayback() {
         ioQueue.async { [weak self] in
             guard let self, self.engine.isRunning else { return }
-            self.pending.removeAll()
             self.scheduledChunks = 0
-            self.isPriming = true
             self.player.stop()
             self.player.play()
         }

@@ -66,11 +66,11 @@ enum Config {
     /// Gemini Live가 내보내는 출력 포맷: 24kHz mono PCM16 raw.
     static let playSampleRate: Double = 24_000
 
-    /// 보호자 콘솔의 관전 화면이 부드러워야 해서 초당 5장을 보낸다.
-    /// 모델에 넣는 것은 서버가 초당 1장으로 솎아내므로 토큰 비용은 그대로다.
-    static let frameInterval: TimeInterval = 0.2
+    /// 관전 화면이 부드럽되 업로드가 내려오는 음성을 밀어내지 않을 만큼만 보낸다.
+    /// 초당 5장은 혼잡한 Wi-Fi에서 오디오 수신을 굶겨 소리가 끊겼다.
+    static let frameInterval: TimeInterval = 0.4
 
-    static let jpegQuality: Double = 0.7
+    static let jpegQuality: Double = 0.5   // 화질보다 대역폭이 중요하다
 
     /// 동반자 코드 자릿수. 서버가 헷갈리는 글자(I/1/L, O/0)를 뺀 31자 알파벳으로 만든다.
     static let accessCodeLength = 6

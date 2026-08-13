@@ -223,7 +223,27 @@ async def _run_gemini_session(
     nudge_input_queue,
     transcript: list | None = None,
 ):
+    # 내보내는 오디오의 간격을 잰다. 소리가 끊길 때 "모델이 늦게 주는 것"과
+    # "폰까지 오는 길에서 늦는 것"을 구분할 방법이 이것뿐이다.
+    out_stats = {"chunks": 0, "bytes": 0, "gaps": 0, "last": 0.0, "worst": 0.0}
+
     async def audio_output_callback(data):
+        now = time.monotonic()
+        if out_stats["last"]:
+            gap = now - out_stats["last"]
+            # 24kHz PCM16 기준 한 청크는 보통 수십 ms 분량이다. 300ms 넘게 비면
+            # 사람 귀에 끊김으로 들린다.
+            if gap > 0.3:
+                out_stats["gaps"] += 1
+                out_stats["worst"] = max(out_stats["worst"], gap)
+        out_stats["last"] = now
+        out_stats["chunks"] += 1
+        out_stats["bytes"] += len(data)
+        if out_stats["chunks"] % 200 == 0:
+            played = out_stats["bytes"] / 48000  # 24kHz * 2byte = 초당 48000바이트
+            logger.info(f"[/unified] 오디오 송출 {out_stats['chunks']}청크 / "
+                        f"{played:.1f}초 분량 · 300ms+ 공백 {out_stats['gaps']}회 "
+                        f"(최대 {out_stats['worst']:.2f}초)")
         await websocket.send_bytes(data)
 
     async def audio_interrupt_callback():
